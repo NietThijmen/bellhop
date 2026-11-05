@@ -1,0 +1,56 @@
+# https://taskfile.dev — cross-platform task runner (works on Windows without make).
+version: "3"
+
+vars:
+  PKG: github.com/nietthijmen/bellhop
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  LDFLAGS: -s -w -X {{.PKG}}/pkg/version.Version={{.VERSION}}
+  CMDS: bellhopd bellhop bellhop-helper
+
+env:
+  CGO_ENABLED: "0"
+
+tasks:
+  default:
+    cmds: [task: check]
+
+  check:
+    desc: Lint, test and build for the host
+    cmds:
+      - task: lint
+      - task: test
+      - task: build
+
+  lint:
+    cmds:
+      - golangci-lint run ./...
+
+  test:
+    cmds:
+      - go test ./...
+
+  test-race:
+    desc: The race detector needs cgo
+    env: { CGO_ENABLED: "1" }
+    cmds:
+      - go test -race ./...
+
+  test-integration:
+    cmds:
+      - go test -tags integration ./...
+
+  build:
+    desc: Build the daemon, CLI and helper into ./bin
+    cmds:
+      - for: { var: CMDS, split: " " }
+        cmd: go build -trimpath -ldflags "{{.LDFLAGS}}" -o bin/{{.ITEM}}{{exeExt}} ./cmd/{{.ITEM}}
+
+  cross:
+    desc: Cross-compile internal/ and the cgo-free commands for every target
+    cmds:
+      - for:
+          matrix:
+            OS: [darwin, linux, windows]
+            ARCH: [amd64, arm64]
+        cmd: GOOS={{.ITEM.OS}} GOARCH={{.ITEM.ARCH}} go build ./internal/... ./pkg/... ./cmd/bellhopd ./cmd/bellhop ./cmd/bellhop-helper

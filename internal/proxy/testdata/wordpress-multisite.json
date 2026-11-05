@@ -1,0 +1,279 @@
+{
+  "admin": {
+    "config": {
+      "persist": false
+    },
+    "disabled": true
+  },
+  "apps": {
+    "http": {
+      "servers": {
+        "sites": {
+          "automatic_https": {
+            "disable": true
+          },
+          "listen": [
+            "127.0.0.1:8080"
+          ],
+          "logs": {
+            "logger_names": {
+              "*.wp.localhost": [
+                "wordpress"
+              ],
+              "wp.localhost": [
+                "wordpress"
+              ]
+            },
+            "skip_unmapped_hosts": true
+          },
+          "protocols": [
+            "h1"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "request_body",
+                  "max_size": 536870912
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
+                  "handler": "subroute",
+                  "routes": [
+                    {
+                      "handle": [
+                        {
+                          "handler": "vars",
+                          "root": "/srv/wordpress"
+                        }
+                      ]
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "static_response",
+                          "status_code": 404
+                        }
+                      ],
+                      "match": [
+                        {
+                          "not": [
+                            {
+                              "path": [
+                                "/.well-known/*"
+                              ]
+                            }
+                          ],
+                          "path": [
+                            "*/.*",
+                            "*.sql",
+                            "*.sqlite",
+                            "*.sqlite3",
+                            "*.log",
+                            "*.bak",
+                            "*.old",
+                            "*.orig",
+                            "*.save",
+                            "*.swp",
+                            "*~",
+                            "/vendor/*",
+                            "/node_modules/*",
+                            "/composer.lock",
+                            "/auth.json"
+                          ]
+                        }
+                      ],
+                      "terminal": true
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "rewrite",
+                          "uri": "{http.regexp.rw_wordpress_0.1}"
+                        }
+                      ],
+                      "match": [
+                        {
+                          "not": [
+                            {
+                              "file": {
+                                "root": "/srv/wordpress",
+                                "try_files": [
+                                  "{http.request.uri.path}",
+                                  "{http.request.uri.path}/"
+                                ]
+                              }
+                            }
+                          ],
+                          "path_regexp": {
+                            "name": "rw_wordpress_0",
+                            "pattern": "^/[_0-9a-zA-Z-]+(/wp-(admin|content|includes).*)$"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "rewrite",
+                          "uri": "{http.regexp.rw_wordpress_1.1}"
+                        }
+                      ],
+                      "match": [
+                        {
+                          "not": [
+                            {
+                              "file": {
+                                "root": "/srv/wordpress",
+                                "try_files": [
+                                  "{http.request.uri.path}",
+                                  "{http.request.uri.path}/"
+                                ]
+                              }
+                            }
+                          ],
+                          "path_regexp": {
+                            "name": "rw_wordpress_1",
+                            "pattern": "^/[_0-9a-zA-Z-]+(/.*\\.php)$"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "group": "try_wordpress",
+                      "handle": [
+                        {
+                          "handler": "rewrite",
+                          "uri": "{http.matchers.file.relative}"
+                        }
+                      ],
+                      "match": [
+                        {
+                          "file": {
+                            "root": "/srv/wordpress",
+                            "split_path": [
+                              ".php"
+                            ],
+                            "try_files": [
+                              "{http.request.uri.path}",
+                              "{http.request.uri.path}/index.php",
+                              "{http.request.uri.path}/index.html",
+                              "{http.request.uri.path}/"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "group": "try_wordpress",
+                      "handle": [
+                        {
+                          "handler": "rewrite",
+                          "uri": "{http.matchers.file.relative}?{http.request.uri.query}"
+                        }
+                      ],
+                      "match": [
+                        {
+                          "file": {
+                            "root": "/srv/wordpress",
+                            "split_path": [
+                              ".php"
+                            ],
+                            "try_files": [
+                              "/index.php"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "reverse_proxy",
+                          "transport": {
+                            "env": {
+                              "SERVER_NAME": "{http.request.host}"
+                            },
+                            "protocol": "fastcgi",
+                            "root": "/srv/wordpress",
+                            "split_path": [
+                              ".php"
+                            ]
+                          },
+                          "upstreams": [
+                            {
+                              "dial": "unix//run/php-8.3.sock"
+                            }
+                          ]
+                        }
+                      ],
+                      "match": [
+                        {
+                          "path": [
+                            "*.php"
+                          ]
+                        }
+                      ],
+                      "terminal": true
+                    },
+                    {
+                      "handle": [
+                        {
+                          "handler": "file_server",
+                          "index_names": [
+                            "index.php",
+                            "index.html"
+                          ],
+                          "root": "/srv/wordpress"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "wp.localhost",
+                    "*.wp.localhost"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "body": "no such site\n",
+                  "handler": "static_response",
+                  "status_code": 404
+                }
+              ],
+              "terminal": true
+            }
+          ]
+        }
+      }
+    }
+  },
+  "logging": {
+    "logs": {
+      "wordpress": {
+        "encoder": {
+          "format": "json"
+        },
+        "include": [
+          "http.log.access.wordpress"
+        ],
+        "writer": {
+          "filename": "/var/log/bellhop/sites/wordpress.log",
+          "output": "file",
+          "roll": false
+        }
+      }
+    }
+  }
+}

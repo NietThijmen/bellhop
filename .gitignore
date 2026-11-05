@@ -1,0 +1,11 @@
+/dist/
+/bin/
+*.exe
+*.test
+*.out
+coverage.*
+.idea/workspace.xml
+.idea/shelf/
+node_modules/
+cmd/bellhop-app/frontend/dist/
+cmd/bellhop-app/build/bin/

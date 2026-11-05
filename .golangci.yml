@@ -1,0 +1,28 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        - G204 # subprocess launched with variable: the supervisor does this by design, always via argv
+        - G304 # file inclusion via variable: paths come from our own directories
+  exclusions:
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, errcheck]
+formatters:
+  enable:
+    - gofmt
+    - goimports
