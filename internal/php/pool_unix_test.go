@@ -43,6 +43,10 @@ func TestPoolSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dials, err := PoolDials(m.runDir, DefaultVersion)
+	if err != nil || len(dials) != 1 || dials[0] != sock {
+		t.Fatalf("PoolDials = %v, %v", dials, err)
+	}
 	if spec.Name != name || spec.Name != "php-8.3" {
 		t.Fatalf("name = %s", spec.Name)
 	}

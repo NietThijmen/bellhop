@@ -56,11 +56,11 @@ func (d *daemon) proxySites(ctx context.Context) ([]proxy.Site, error) {
 			if ver == "" {
 				ver = php.DefaultVersion
 			}
-			sock, err := php.SocketPath(d.dirs.Run, ver)
+			dials, err := php.PoolDials(d.dirs.Run, ver)
 			if err != nil {
 				item.PlanErr = err
 			} else {
-				item.Socket = sock
+				item.Sockets = dials
 			}
 		}
 		out = append(out, item)

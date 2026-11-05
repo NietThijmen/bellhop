@@ -86,6 +86,15 @@ func (m *Manager) PoolSpecs(version string) ([]supervisor.Spec, error) {
 	}}, nil
 }
 
+// PoolDials is the address Caddy dials for a PHP line: the php-fpm socket.
+func PoolDials(runDir, version string) ([]string, error) {
+	sock, err := SocketPath(runDir, version)
+	if err != nil {
+		return nil, err
+	}
+	return []string{sock}, nil
+}
+
 func currentIdentity() (account, group string, err error) {
 	u, err := user.Current()
 	if err != nil {

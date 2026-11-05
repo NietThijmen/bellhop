@@ -111,7 +111,7 @@ func TestGolden(t *testing.T) {
 				"/var/log/bellhop/sites/laravel.log",
 				`"root": "/srv/laravel/public"`,
 			},
-			reject: []string{"/vendor/*", `"HTTPS"`, ":443", `"pki"`},
+			reject: []string{"/vendor/*", `"HTTPS"`, ":443", `"pki"`, "least_conn"},
 		},
 		{
 			name:    "wordpress-multisite.json",
@@ -129,7 +129,7 @@ func TestGolden(t *testing.T) {
 				"/vendor/*",
 				"/var/log/bellhop/sites/wordpress.log",
 			},
-			reject: []string{":443", `"pki"`, `"HTTPS"`},
+			reject: []string{":443", `"pki"`, `"HTTPS"`, "least_conn"},
 		},
 		{
 			name:    "static.json",
@@ -167,6 +167,66 @@ func TestGolden(t *testing.T) {
 			compareGolden(t, tc.name, raw)
 		})
 	}
+}
+
+func TestLeastConnGolden(t *testing.T) {
+	dir, err := filepath.Abs(filepath.Join("..", "drivers", "testdata", "laravel"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := drivers.PlanFor(dir, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Docroot = "/srv/laravel/public"
+	raw, err := Build(Input{
+		Listen:  "127.0.0.1:8080",
+		LogsDir: "/var/log/bellhop",
+		Sites: []Site{{
+			Name:  "laravel",
+			Hosts: []string{"laravel.localhost"},
+			Plan:  plan,
+			Sockets: []string{
+				"127.0.0.1:9108",
+				"127.0.0.1:9109",
+				"127.0.0.1:9110",
+				"127.0.0.1:9111",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		`"policy": "least_conn"`,
+		`"selection_policy"`,
+		`"load_balancing"`,
+		`"dial": "127.0.0.1:9108"`,
+		`"dial": "127.0.0.1:9109"`,
+		`"dial": "127.0.0.1:9110"`,
+		`"dial": "127.0.0.1:9111"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	one, err := Build(Input{
+		Listen: "127.0.0.1:8080",
+		Sites: []Site{{
+			Name:   "laravel",
+			Hosts:  []string{"laravel.localhost"},
+			Plan:   plan,
+			Socket: "127.0.0.1:9108",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(one), "least_conn") {
+		t.Fatal("one upstream was load-balanced")
+	}
+	compareGolden(t, "least-conn.json", raw)
 }
 
 func goldenConfig(t *testing.T, fixture, docroot string, hosts []string, socket string) []byte {

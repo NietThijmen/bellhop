@@ -25,10 +25,16 @@ type Site struct {
 	Hosts   []string // primary hostname, wildcard, aliases; port is not included
 	Plan    drivers.ServePlan
 	PlanErr error
-	// Socket is the PHP pool. "127.0.0.1:9000", "unix//run/php-8.3.sock",
-	// "unix/C:/bellhop/run/php-8.3.sock", or an absolute filesystem path
-	// (rewritten to Caddy's unix/ dial form).
+	// Socket is one PHP pool address. "127.0.0.1:9000",
+	// "unix//run/php-8.3.sock", "unix/C:/bellhop/run/php-8.3.sock", or an
+	// absolute filesystem path (rewritten to Caddy's unix/ dial form).
+	// Ignored when Sockets is non-empty.
 	Socket string
+	// Sockets are the PHP pool addresses. One entry is a single upstream.
+	// Two or more are load-balanced with least_conn
+	// (reverseproxy.go load_balancing.selection_policy, inline key policy,
+	// selectionpolicies.go least_conn).
+	Sockets []string
 }
 
 // Input is the Caddy config Build encodes. Listen empty means DefaultAddr.
@@ -56,7 +62,8 @@ type Input struct {
 //	http.handlers.rewrite       uri
 //	http.handlers.subroute      routes
 //	http.handlers.file_server   root, index_names
-//	http.handlers.reverse_proxy upstreams[].dial, transport
+//	http.handlers.reverse_proxy upstreams[].dial, transport, load_balancing
+//	http.reverse_proxy.load_balancing.selection_policy.policy least_conn (two or more upstreams)
 //	http.reverse_proxy.transport.fastcgi protocol, root, split_path, env
 //	http.matchers.host, path, path_regexp (name, pattern), not, file.try_files, file.root, file.split_path
 //	logging.logs.<name>.include, writer.output "file", writer.filename, encoder.format "json"
@@ -242,11 +249,11 @@ func oneSite(site Site, logsDir string) (map[string]any, accessLog, error) {
 	inner = append(inner, rewriteRoutes(site.Name, docroot, site.Plan.Rewrites)...)
 	inner = append(inner, tryRoutes(site.Name, docroot, site.Plan)...)
 	if site.Plan.PHP {
-		dial, err := phpDial(site.Socket)
+		dials, err := phpDials(site)
 		if err != nil {
 			return nil, accessLog{}, fmt.Errorf("site %s: %w", site.Name, err)
 		}
-		inner = append(inner, phpRoute(docroot, dial))
+		inner = append(inner, phpRoute(docroot, dials))
 	}
 	inner = append(inner, fileServerRoute(docroot, site.Plan.IndexFiles))
 	route := hostRoute(hosts, []any{map[string]any{
@@ -371,20 +378,32 @@ func tryRoutes(site, docroot string, plan drivers.ServePlan) []any {
 	return out
 }
 
-func phpRoute(docroot, dial string) map[string]any {
-	return map[string]any{
-		"handle": []any{map[string]any{
-			"handler": "reverse_proxy",
-			"transport": map[string]any{
-				"env": map[string]string{
-					"SERVER_NAME": "{http.request.host}",
-				},
-				"protocol":   "fastcgi",
-				"root":       docroot,
-				"split_path": []string{".php"},
+func phpRoute(docroot string, dials []string) map[string]any {
+	upstreams := make([]any, len(dials))
+	for i, dial := range dials {
+		upstreams[i] = map[string]any{"dial": dial}
+	}
+	handler := map[string]any{
+		"handler": "reverse_proxy",
+		"transport": map[string]any{
+			"env": map[string]string{
+				"SERVER_NAME": "{http.request.host}",
 			},
-			"upstreams": []any{map[string]any{"dial": dial}},
-		}},
+			"protocol":   "fastcgi",
+			"root":       docroot,
+			"split_path": []string{".php"},
+		},
+		"upstreams": upstreams,
+	}
+	if len(dials) >= 2 {
+		// LeastConnSelection has no fields. The module id's last label is
+		// the inline policy key (caddy:"inline_key=policy").
+		handler["load_balancing"] = map[string]any{
+			"selection_policy": map[string]any{"policy": "least_conn"},
+		}
+	}
+	return map[string]any{
+		"handle":   []any{handler},
 		"match":    []any{map[string]any{"path": []string{"*.php"}}},
 		"terminal": true,
 	}
@@ -520,6 +539,25 @@ func token(s string) string {
 		return "site"
 	}
 	return b.String()
+}
+
+func phpDials(site Site) ([]string, error) {
+	raw := site.Sockets
+	if len(raw) == 0 && strings.TrimSpace(site.Socket) != "" {
+		raw = []string{site.Socket}
+	}
+	if len(raw) == 0 {
+		return nil, errors.New("PHP socket is empty")
+	}
+	out := make([]string, 0, len(raw))
+	for _, socket := range raw {
+		dial, err := phpDial(socket)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, dial)
+	}
+	return out, nil
 }
 
 // phpDial converts a pool address into Caddy's reverse_proxy dial form.

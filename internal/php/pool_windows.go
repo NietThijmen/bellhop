@@ -98,6 +98,21 @@ func (m *Manager) PoolSpecs(version string) ([]supervisor.Spec, error) {
 	return specs, nil
 }
 
+// PoolDials is the addresses Caddy dials for a PHP line: one
+// 127.0.0.1:<port> per php-cgi worker. runDir is unused; ports are stable.
+func PoolDials(runDir, version string) ([]string, error) {
+	_ = runDir
+	ports, err := CGIPorts(version)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(ports))
+	for i, port := range ports {
+		out[i] = net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	}
+	return out, nil
+}
+
 // ensureVCRuntime fails when this PHP line's Visual C++ redistributable is
 // missing. PHP 8.4 and later need the VS 2022 runtime; 8.1–8.3 need the
 // VS 2019 runtime. A newer redistributable satisfies an older line.

@@ -102,6 +102,26 @@ func TestPoolSpecsMissingRuntime(t *testing.T) {
 	}
 }
 
+func TestPoolDials(t *testing.T) {
+	got, err := PoolDials("", "8.3.36-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"127.0.0.1:9108", "127.0.0.1:9109", "127.0.0.1:9110", "127.0.0.1:9111"}
+	if len(got) != len(want) {
+		t.Fatalf("PoolDials = %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("PoolDials = %v", got)
+		}
+	}
+	got, err = PoolDials("", "8.1")
+	if err != nil || got[0] != "127.0.0.1:9100" || got[3] != "127.0.0.1:9103" {
+		t.Fatalf("8.1 dials = %v, %v", got, err)
+	}
+}
+
 func TestVS2022Line(t *testing.T) {
 	if !vs2022Line("8.4") || !vs2022Line("8.5") || !vs2022Line("9.0") {
 		t.Fatal("8.4 and newer should need the VS 2022 runtime")

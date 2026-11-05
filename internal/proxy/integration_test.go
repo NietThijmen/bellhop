@@ -17,8 +17,8 @@ import (
 )
 
 // TestDriverFixtures serves Laravel, WordPress and static projects through
-// embedded Caddy. PHP execution needs a pool, which Windows does not start
-// in this milestone. Every project must hide /.env, and the static site must
+// embedded Caddy. The PHP upstreams are closed, so this check does not
+// execute PHP. Every project must hide /.env, and the static site must
 // serve its index.
 func TestDriverFixtures(t *testing.T) {
 	root := t.TempDir()
