@@ -36,7 +36,7 @@ func TestHTTPPortAndSitesHook(t *testing.T) {
 	}
 	var n int
 	d.SetSitesChangeHook(func() { n++ })
-	d.SetHTTPPort(9091)
+	d.SetPorts(9091, 9443)
 	d.sites = d.newSitesManager()
 
 	root := t.TempDir()
@@ -54,15 +54,38 @@ func TestHTTPPortAndSitesHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].URL != "http://app.localhost:9091" {
-		t.Fatalf("sites = %+v, want http://app.localhost:9091", list)
+	if len(list) != 1 || !list[0].Secure || list[0].URL != "https://app.test:9443" {
+		t.Fatalf("sites = %+v, want https://app.test:9443", list)
 	}
-	d.SetHTTPPort(0)
+	if err := st.SetSetting(ctx, SettingLocalhostMode, "true"); err != nil {
+		t.Fatal(err)
+	}
 	list, _, err = d.sites.List(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if list[0].URL != "http://app.localhost:"+strconv.Itoa(DefaultHTTPPort) {
+	if list[0].Secure || list[0].URL != "http://app.localhost:9091" {
+		t.Fatalf("localhost mode = %+v", list[0])
+	}
+	if err := st.SetSetting(ctx, SettingTLD, "example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSetting(ctx, SettingLocalhostMode, "false"); err != nil {
+		t.Fatal(err)
+	}
+	list, _, err = d.sites.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list[0].Secure || list[0].URL != "https://app.example:9443" {
+		t.Fatalf("tld example = %+v", list[0])
+	}
+	d.SetPorts(0, 0)
+	list, _, err = d.sites.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list[0].URL != "https://app.example:"+strconv.Itoa(DefaultHTTPSPort) {
 		t.Fatalf("url after reset = %s", list[0].URL)
 	}
 	d.notifySitesChanged() // nil-safe when a hook is installed
@@ -115,7 +138,7 @@ func TestSiteAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Sites) != 1 || listed.Sites[0].Name != "shop" || listed.Sites[0].URL != "http://shop.localhost:"+strconv.Itoa(d.httpPort) {
+	if len(listed.Sites) != 1 || listed.Sites[0].Name != "shop" || !listed.Sites[0].Secure || listed.Sites[0].URL != "https://shop.test:"+strconv.Itoa(d.httpPort+1) {
 		t.Fatalf("Sites = %+v", listed)
 	}
 
@@ -147,7 +170,7 @@ func TestSiteAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Link: %v", err)
 	}
-	if linked.Name != "extra" || linked.Source != api.SourceLinked || linked.URL != "http://extra.localhost:"+strconv.Itoa(d.httpPort) {
+	if linked.Name != "extra" || linked.Source != api.SourceLinked || !linked.Secure || linked.URL != "https://extra.test:"+strconv.Itoa(d.httpPort+1) {
 		t.Fatalf("Link = %+v", linked)
 	}
 
@@ -168,7 +191,7 @@ func TestSiteAPI(t *testing.T) {
 	if len(patched.Aliases) != 1 || patched.Aliases[0] != "shop.example" {
 		t.Fatalf("aliases = %#v", patched.Aliases)
 	}
-	if !strings.HasPrefix(patched.URL, "https://shop.localhost:"+strconv.Itoa(d.httpPort+1)) {
+	if !strings.HasPrefix(patched.URL, "https://shop.test:"+strconv.Itoa(d.httpPort+1)) {
 		t.Fatalf("url = %s", patched.URL)
 	}
 	waitSiteEvent(t, ctx, evs, sites.ReasonPatch)

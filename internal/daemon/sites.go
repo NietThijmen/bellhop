@@ -114,18 +114,42 @@ func (d *daemon) defaultPHP(ctx context.Context) string {
 	return s[SettingDefaultPHP]
 }
 
-// newSitesManager builds the site manager for this daemon. Hostnames are
-// <name>.localhost in this milestone (DNS and the configured tld are later).
-// Secure stays at the manager's localhost-mode default, which is false.
+// newSitesManager builds the site manager for this daemon.
+// Localhost mode serves <name>.localhost and leaves secure off.
+// Otherwise the host is <name>.<tld> and secure defaults to on.
 func (d *daemon) newSitesManager() *sites.Manager {
 	return sites.NewManager(sites.Options{
-		Store:      d.store,
-		Publisher:  d.bus,
-		Host:       func() string { return "localhost" },
-		URL:        d.siteURL,
-		DefaultPHP: d.defaultPHP,
-		OnChange:   d.notifySitesChanged,
+		Store:         d.store,
+		Publisher:     d.bus,
+		Host:          d.siteHost,
+		DefaultSecure: d.defaultSecure,
+		URL:           d.siteURL,
+		DefaultPHP:    d.defaultPHP,
+		OnChange:      d.notifySitesChanged,
 	})
+}
+
+func (d *daemon) siteHost() string {
+	s, err := d.settings(context.Background())
+	if err != nil {
+		d.log.Warn("read site host settings", "err", err)
+		return "test"
+	}
+	if s[SettingLocalhostMode] == "true" {
+		return "localhost"
+	}
+	if s[SettingTLD] == "" {
+		return "test"
+	}
+	return s[SettingTLD]
+}
+
+func (d *daemon) defaultSecure() bool {
+	s, err := d.settings(context.Background())
+	if err != nil {
+		return true
+	}
+	return s[SettingLocalhostMode] != "true"
 }
 
 func (d *daemon) registerSiteRoutes(mux *http.ServeMux) {

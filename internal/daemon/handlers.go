@@ -369,12 +369,12 @@ func (d *daemon) handleSettingsPatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	d.log.Info("settings changed", "settings", clean)
-	if _, ok := clean[SettingDefaultPHP]; ok {
+	_, tldChanged := clean[SettingTLD]
+	_, modeChanged := clean[SettingLocalhostMode]
+	if _, ok := clean[SettingDefaultPHP]; ok || tldChanged || modeChanged {
 		d.notifySitesChanged()
 	}
-	if _, ok := clean[SettingTLD]; ok {
-		d.syncDNS(r.Context())
-	} else if _, ok := clean[SettingLocalhostMode]; ok {
+	if tldChanged || modeChanged {
 		d.syncDNS(r.Context())
 	}
 	s, err := d.settings(r.Context())
