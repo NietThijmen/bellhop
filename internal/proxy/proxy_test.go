@@ -1,7 +1,10 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -201,32 +204,106 @@ func TestReloadReverts(t *testing.T) {
 }
 
 func TestPortFallback(t *testing.T) {
-	held, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	var held []net.Listener
+	for _, addr := range []string{"127.0.0.1:80", "127.0.0.1:443", "[::1]:80", "[::1]:443"} {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			continue
+		}
+		held = append(held, ln)
 	}
-	t.Cleanup(func() { _ = held.Close() })
-	taken := held.Addr().(*net.TCPAddr).Port
-	var gotPort int
-	p := New(Options{
-		Addr: held.Addr().String(),
-		OnReloaded: func(port int) {
-			gotPort = port
-		},
+	t.Cleanup(func() {
+		for _, ln := range held {
+			_ = ln.Close()
+		}
 	})
+	p := New(Options{})
 	t.Cleanup(func() { _ = p.Close() })
 	if err := p.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if p.Port() == taken || p.Port() == 0 {
-		t.Fatalf("port = %d, held %d", p.Port(), taken)
+	if p.Port() == privilegedHTTP {
+		if p.Degraded() || p.HTTPSPort() != privilegedHTTPS {
+			t.Fatalf("privileged ports degraded=%v http=%d https=%d", p.Degraded(), p.Port(), p.HTTPSPort())
+		}
+		return
 	}
-	if gotPort != p.Port() {
-		t.Fatalf("OnReloaded port = %d, Port() = %d", gotPort, p.Port())
+	if !p.Degraded() || p.Port() != fallbackHTTP || p.HTTPSPort() != fallbackHTTPS {
+		t.Fatalf("fallback degraded=%v http=%d https=%d", p.Degraded(), p.Port(), p.HTTPSPort())
 	}
-	status, body := get(t, fmt.Sprintf("http://127.0.0.1:%d/", p.Port()), "no.such.localhost")
-	if status != http.StatusNotFound || !strings.Contains(body, "no such site") {
-		t.Fatalf("unknown host = %d %q", status, body)
+}
+
+func TestSecureRedirect(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "index.html"), "hello-secure")
+	plan := drivers.ServePlan{
+		Driver:     "static",
+		Docroot:    dir,
+		TryFiles:   []string{"{path}", "{path}/index.html", "=404"},
+		IndexFiles: []string{"index.html"},
+	}
+	p := New(Options{Addr: freePair(t), StorageDir: t.TempDir()})
+	t.Cleanup(func() { _ = p.Close() })
+	ctx := context.Background()
+	if err := p.Reload(ctx, []Site{{
+		Name: "sec", Hosts: []string{"sec.localhost"}, Secure: true, Plan: plan,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/", p.Port()), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "sec.localhost"
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	wantLoc := fmt.Sprintf("https://sec.localhost:%d/", p.HTTPSPort())
+	if resp.StatusCode != http.StatusPermanentRedirect || resp.Header.Get("Location") != wantLoc {
+		t.Fatalf("redirect = %d %q, want %s", resp.StatusCode, resp.Header.Get("Location"), wantLoc)
+	}
+
+	root, err := os.ReadFile(filepath.Join(p.opts.StorageDir, "pki", "authorities", "bellhop", "root.crt"))
+	if err != nil || !bytes.Contains(root, []byte("BEGIN CERTIFICATE")) {
+		t.Fatalf("local CA root: %v", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(root) {
+		t.Fatal("root PEM was not a certificate")
+	}
+	tlsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		RootCAs:    pool,
+		ServerName: "sec.localhost",
+	}}}
+	var (
+		secure *http.Response
+		body   []byte
+	)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		secureReq, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://127.0.0.1:%d/", p.HTTPSPort()), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		secureReq.Host = "sec.localhost"
+		secure, err = tlsClient.Do(secureReq)
+		if err == nil {
+			body, _ = io.ReadAll(secure.Body)
+			_ = secure.Body.Close()
+			if secure.StatusCode == http.StatusOK && string(body) == "hello-secure" {
+				break
+			}
+			err = fmt.Errorf("status %d body %q", secure.StatusCode, body)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -250,6 +327,28 @@ func TestClose(t *testing.T) {
 		_ = conn.Close()
 		t.Fatal("listener still open")
 	}
+}
+
+func freePair(t *testing.T) string {
+	t.Helper()
+	for range 32 {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		next, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port+1))
+		if err != nil {
+			_ = ln.Close()
+			continue
+		}
+		addr := ln.Addr().String()
+		_ = next.Close()
+		_ = ln.Close()
+		return addr
+	}
+	t.Fatal("no consecutive free ports")
+	return ""
 }
 
 func freeAddr(t *testing.T) string {

@@ -168,7 +168,7 @@ func TestSiteAPI(t *testing.T) {
 	if len(patched.Aliases) != 1 || patched.Aliases[0] != "shop.example" {
 		t.Fatalf("aliases = %#v", patched.Aliases)
 	}
-	if !strings.HasPrefix(patched.URL, "https://shop.localhost:"+strconv.Itoa(d.httpPort)) {
+	if !strings.HasPrefix(patched.URL, "https://shop.localhost:"+strconv.Itoa(d.httpPort+1)) {
 		t.Fatalf("url = %s", patched.URL)
 	}
 	waitSiteEvent(t, ctx, evs, sites.ReasonPatch)

@@ -25,6 +25,8 @@ type Site struct {
 	Hosts   []string // primary hostname, wildcard, aliases; port is not included
 	Plan    drivers.ServePlan
 	PlanErr error
+	// Secure redirects HTTP to HTTPS and serves the site on the TLS listener.
+	Secure bool
 	// Socket is one PHP pool address. "127.0.0.1:9000",
 	// "unix//run/php-8.3.sock", "unix/C:/bellhop/run/php-8.3.sock", or an
 	// absolute filesystem path (rewritten to Caddy's unix/ dial form).
@@ -37,13 +39,19 @@ type Site struct {
 	Sockets []string
 }
 
-// Input is the Caddy config Build encodes. Listen empty means DefaultAddr.
+// Input is the Caddy config Build encodes.
+// Listen is one HTTP address used when HTTPListen is empty.
+// HTTPListen and HTTPSListen are the full listen lists. HTTPSListen
+// turns on the local CA and TLS. An empty Listen and HTTPListen means DefaultAddr.
 type Input struct {
-	Listen     string
-	LogsDir    string
-	StorageDir string
-	MaxBody    int64
-	Sites      []Site
+	Listen      string
+	HTTPListen  []string
+	HTTPSListen []string
+	HTTPSPort   int // port written into HTTP redirects; 443 omits it
+	LogsDir     string
+	StorageDir  string
+	MaxBody     int64
+	Sites       []Site
 }
 
 // Build returns indented Caddy JSON for in. It does not listen and does
@@ -52,7 +60,11 @@ type Input struct {
 //	admin.disabled, admin.config.persist
 //	apps.http.servers.*.listen
 //	apps.http.servers.*.automatic_https.disable          (autohttps.go)
-//	apps.http.servers.*.protocols                        (server.go; "h1" only, no TLS and no HTTP/3)
+//	apps.http.servers.*.protocols                        (server.go; HTTP is "h1", HTTPS is "h1" and "h2", no HTTP/3)
+//	apps.http.servers.*.tls_connection_policies          (server.go; non-empty enables TLS)
+//	apps.tls.certificates.automate                       (tls.go AutomateLoader)
+//	apps.tls.automation.policies.issuers                 (internalissuer.go; inline key module, ca bellhop)
+//	apps.pki.certificate_authorities.bellhop             (pki.go map key is the CA id; ca.go name and install_trust)
 //	apps.http.servers.*.logs.logger_names                (logging.go)
 //	apps.http.servers.*.logs.skip_unmapped_hosts
 //	apps.http.servers.*.routes[].match / handle / terminal / group
@@ -95,52 +107,80 @@ func marshal(v any) ([]byte, error) {
 }
 
 func document(in Input) (map[string]any, error) {
-	listen := strings.TrimSpace(in.Listen)
-	if listen == "" {
-		listen = DefaultAddr
+	httpListen := in.HTTPListen
+	if len(httpListen) == 0 {
+		listen := strings.TrimSpace(in.Listen)
+		if listen == "" {
+			listen = DefaultAddr
+		}
+		httpListen = []string{listen}
 	}
+	httpsListen := append([]string(nil), in.HTTPSListen...)
 	sites := append([]Site(nil), in.Sites...)
 	sort.Slice(sites, func(i, j int) bool { return sites[i].Name < sites[j].Name })
 	if err := validateSites(sites); err != nil {
 		return nil, err
 	}
 
-	routes := []any{requestBodyRoute(bodyLimit(in.MaxBody))}
+	limit := requestBodyRoute(bodyLimit(in.MaxBody))
+	notFound := map[string]any{
+		"handle":   []any{staticResponse(http.StatusNotFound, "no such site\n")},
+		"terminal": true,
+	}
+	httpRoutes := []any{limit}
+	httpsRoutes := []any{limit}
 	var logs []accessLog
+	var subjects []string
 	for _, site := range sites {
 		route, log, err := oneSite(site, in.LogsDir)
 		if err != nil {
 			return nil, err
 		}
-		routes = append(routes, route)
 		if log.file != "" {
 			logs = append(logs, log)
 		}
+		if site.Secure && len(httpsListen) > 0 {
+			hosts, err := normalizeHosts(site.Hosts)
+			if err != nil {
+				return nil, fmt.Errorf("site %s: %w", site.Name, err)
+			}
+			httpRoutes = append(httpRoutes, redirectRoute(hosts, in.HTTPSPort))
+			httpsRoutes = append(httpsRoutes, route)
+			subjects = append(subjects, hosts...)
+		} else {
+			httpRoutes = append(httpRoutes, route)
+		}
 	}
-	routes = append(routes, map[string]any{
-		"handle":   []any{staticResponse(http.StatusNotFound, "no such site\n")},
-		"terminal": true,
-	})
+	httpRoutes = append(httpRoutes, notFound)
+	httpsRoutes = append(httpsRoutes, notFound)
 
-	server := map[string]any{
-		"automatic_https": map[string]any{"disable": true},
-		"listen":          []string{listen},
-		"protocols":       []string{"h1"},
-		"routes":          routes,
+	httpName := "sites"
+	if len(httpsListen) > 0 {
+		httpName = "http"
 	}
-	if len(logs) > 0 {
-		server["logs"] = serverLogs(logs)
+	servers := map[string]any{
+		httpName: httpServer(httpListen, httpRoutes, logs),
+	}
+	if len(httpsListen) > 0 {
+		https := httpServer(httpsListen, httpsRoutes, logs)
+		https["protocols"] = []string{"h1", "h2"}
+		// A non-empty policy list enables TLS (caddyhttp app.go useTLS).
+		https["tls_connection_policies"] = []any{map[string]any{}}
+		servers["https"] = https
+	}
+	apps := map[string]any{
+		"http": map[string]any{"servers": servers},
+	}
+	if len(httpsListen) > 0 {
+		apps["pki"] = pkiApp()
+		apps["tls"] = tlsApp(subjects)
 	}
 	doc := map[string]any{
 		"admin": map[string]any{
 			"config":   map[string]any{"persist": false},
 			"disabled": true,
 		},
-		"apps": map[string]any{
-			"http": map[string]any{
-				"servers": map[string]any{"sites": server},
-			},
-		},
+		"apps": apps,
 	}
 	if len(logs) > 0 {
 		doc["logging"] = map[string]any{"logs": loggingLogs(logs)}
@@ -150,6 +190,67 @@ func document(in Input) (map[string]any, error) {
 		doc["storage"] = map[string]any{"module": "file_system", "root": dir}
 	}
 	return doc, nil
+}
+
+func httpServer(listen []string, routes []any, logs []accessLog) map[string]any {
+	server := map[string]any{
+		"automatic_https": map[string]any{"disable": true},
+		"listen":          listen,
+		"protocols":       []string{"h1"},
+		"routes":          routes,
+	}
+	if len(logs) > 0 {
+		server["logs"] = serverLogs(logs)
+	}
+	return server
+}
+
+// pkiApp is the local CA. The map key is the CA id Caddy stores under
+// pki/authorities/<id>. install_trust false keeps trust out of the proxy;
+// the helper installs it. The "local" CA is Caddy's implicit default
+// (pki.go GetCA); it is declared here so its trust install stays off too.
+func pkiApp() map[string]any {
+	disabled := map[string]any{"install_trust": false}
+	return map[string]any{
+		"certificate_authorities": map[string]any{
+			"bellhop": map[string]any{
+				"name":          "bellhop",
+				"install_trust": false,
+			},
+			"local": disabled,
+		},
+	}
+}
+
+// tlsApp asks the internal issuer (CA id bellhop) for each secure hostname.
+func tlsApp(subjects []string) map[string]any {
+	app := map[string]any{}
+	if len(subjects) == 0 {
+		return app
+	}
+	app["certificates"] = map[string]any{"automate": subjects}
+	app["automation"] = map[string]any{
+		"policies": []any{map[string]any{
+			"subjects": subjects,
+			"issuers": []any{map[string]any{
+				"module": "internal",
+				"ca":     "bellhop",
+			}},
+		}},
+	}
+	return app
+}
+
+func redirectRoute(hosts []string, httpsPort int) map[string]any {
+	loc := "https://{http.request.host}{http.request.uri}"
+	if httpsPort != 0 && httpsPort != 443 {
+		loc = "https://{http.request.host}:" + strconv.Itoa(httpsPort) + "{http.request.uri}"
+	}
+	return hostRoute(hosts, []any{map[string]any{
+		"handler":     "static_response",
+		"status_code": http.StatusPermanentRedirect,
+		"headers":     map[string][]string{"Location": {loc}},
+	}}, true)
 }
 
 func bodyLimit(n int64) int64 {

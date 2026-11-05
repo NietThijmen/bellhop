@@ -1,8 +1,11 @@
-// Package proxy embeds Caddy and serves sites over HTTP from each site's
-// drivers.ServePlan.
+// Package proxy embeds Caddy and serves sites over HTTP and HTTPS from each
+// site's drivers.ServePlan.
 //
-// M2 listens on 127.0.0.1:8080 (then the next free ports). It does not
-// terminate TLS, install a CA, or bind port 443. The daemon should:
+// The default bind is 127.0.0.1 and ::1 on ports 80 and 443. If either
+// privileged port fails, both fall back to 8080 and 8443 and Degraded is
+// set. An explicit Options.Addr is one HTTP port; HTTPS uses the next port.
+// The local CA is named bellhop and is not installed into the trust store.
+// The daemon should:
 //
 //	p := proxy.New(proxy.Options{
 //		LogsDir: dirs.Logs,
@@ -37,25 +40,31 @@ import (
 	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/requestbody"          // request_body max_size
 	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/reverseproxy/fastcgi" // reverse_proxy handler and fastcgi transport
 	_ "github.com/caddyserver/caddy/v2/modules/caddyhttp/rewrite"              // rewrite handler
-	_ "github.com/caddyserver/caddy/v2/modules/caddypki"                       // tls app dependency; M2 does not configure PKI
+	_ "github.com/caddyserver/caddy/v2/modules/caddypki"                       // local CA, install_trust false
 	_ "github.com/caddyserver/caddy/v2/modules/caddytls"                       // http app provisions the tls app
 	_ "github.com/caddyserver/caddy/v2/modules/filestorage"                    // default Caddy storage module
 	_ "github.com/caddyserver/caddy/v2/modules/logging"                        // access log file writer and json encoder
 )
 
-// DefaultAddr is the first address M2 tries to bind.
+// DefaultAddr is the HTTP fallback when ports 80 and 443 are unavailable.
 const DefaultAddr = "127.0.0.1:8080"
+
+// Privileged and fallback ports. HTTPS is the next port after an explicit Addr.
+const (
+	privilegedHTTP  = 80
+	privilegedHTTPS = 443
+	fallbackHTTP    = 8080
+	fallbackHTTPS   = 8443
+)
 
 // DefaultMaxBody is the request body limit installed on every site (512 MiB).
 const DefaultMaxBody int64 = 512 << 20
 
-// portAttempts is how many consecutive ports are tried when the first bind fails.
-const portAttempts = 32
-
 // Options configures a Proxy. Zero values are usable.
 type Options struct {
-	// Addr is the first listen address. Empty means DefaultAddr.
-	// If that port is taken, the next ports on the same host are tried.
+	// Addr is an explicit HTTP listen address. Empty tries ports 80 and 443
+	// on the loopback interfaces, then 8080 and 8443.
+	// When set, HTTPS listens on the next port of the same host.
 	Addr string
 	// LogsDir is the directory whose sites/<name>.log files receive
 	// per-site access logs. Empty skips access logging.
@@ -75,19 +84,18 @@ type Options struct {
 // Proxy is one embedded Caddy process. A process should run one Proxy;
 // Caddy's loaded config is global.
 type Proxy struct {
-	opts    Options
-	mu      sync.Mutex
-	host    string
-	port    int
-	started bool
-	last    []byte
+	opts      Options
+	mu        sync.Mutex
+	host      string
+	port      int
+	httpsPort int
+	degraded  bool
+	started   bool
+	last      []byte
 }
 
 // New returns a Proxy that is not listening yet.
 func New(opts Options) *Proxy {
-	if opts.Addr == "" {
-		opts.Addr = DefaultAddr
-	}
 	return &Proxy{opts: opts}
 }
 
@@ -124,12 +132,27 @@ func (p *Proxy) Reload(ctx context.Context, sites []Site) error {
 	return nil
 }
 
-// Port returns the TCP port Caddy is listening on, or 0 before a
+// Port returns the HTTP port Caddy is listening on, or 0 before a
 // successful Start or Reload.
 func (p *Proxy) Port() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.port
+}
+
+// HTTPSPort returns the HTTPS port, or 0 before a successful Start or Reload.
+func (p *Proxy) HTTPSPort() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.httpsPort
+}
+
+// Degraded reports that the privileged ports were unavailable and the
+// proxy is serving 8080 and 8443 instead.
+func (p *Proxy) Degraded() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.degraded
 }
 
 // Close stops Caddy and forgets the chosen port. It is safe to call
@@ -140,7 +163,7 @@ func (p *Proxy) Close() error {
 	if !p.started {
 		return nil
 	}
-	host, port := p.host, p.port
+	host, port, httpsPort := p.host, p.port, p.httpsPort
 	if err := caddy.Stop(); err != nil {
 		return fmt.Errorf("stop proxy: %w", err)
 	}
@@ -149,8 +172,13 @@ func (p *Proxy) Close() error {
 	if err := waitClosed(host, port); err != nil {
 		return err
 	}
+	if err := waitClosed(host, httpsPort); err != nil {
+		return err
+	}
 	p.started = false
 	p.port = 0
+	p.httpsPort = 0
+	p.degraded = false
 	p.host = ""
 	p.last = nil
 	return nil
@@ -159,6 +187,9 @@ func (p *Proxy) Close() error {
 func waitClosed(host string, port int) error {
 	if port == 0 {
 		return nil
+	}
+	if host == "" {
+		host = "127.0.0.1"
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	deadline := time.Now().Add(5 * time.Second)
@@ -175,67 +206,132 @@ func waitClosed(host string, port int) error {
 	}
 }
 
+type listenPlan struct {
+	host      string
+	httpPort  int
+	httpsPort int
+	http      []string
+	https     []string
+	degraded  bool
+}
+
 func (p *Proxy) reload(ctx context.Context, sites []Site) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	host, start, err := parseAddr(p.opts.Addr)
+	plans, err := p.listenPlans()
 	if err != nil {
 		return err
 	}
-	if p.host != "" {
-		host = p.host
-	}
-
-	port := start
-	attempts := portAttempts
 	if p.port != 0 {
-		port = p.port
-		attempts = 1
+		v6 := p.host == "" && ipv6Loopback()
+		plans = []listenPlan{{
+			host:      p.host,
+			httpPort:  p.port,
+			httpsPort: p.httpsPort,
+			http:      addresses(p.host, p.port, v6),
+			https:     addresses(p.host, p.httpsPort, v6),
+			degraded:  p.degraded,
+		}}
 	}
 
 	var (
 		cfg     []byte
 		loadErr error
-		chosen  int
+		chosen  *listenPlan
 	)
-	for i := 0; i < attempts; i++ {
+	for i := range plans {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		try := port + i
-		if try > 65535 {
-			break
-		}
-		listen := net.JoinHostPort(host, strconv.Itoa(try))
-		cfg, err = Build(Input{Listen: listen, LogsDir: p.opts.LogsDir, StorageDir: p.opts.StorageDir, MaxBody: p.opts.MaxBody, Sites: sites})
+		plan := plans[i]
+		cfg, err = Build(Input{
+			HTTPListen:  plan.http,
+			HTTPSListen: plan.https,
+			HTTPSPort:   plan.httpsPort,
+			LogsDir:     p.opts.LogsDir,
+			StorageDir:  p.opts.StorageDir,
+			MaxBody:     p.opts.MaxBody,
+			Sites:       sites,
+		})
 		if err != nil {
 			return err
 		}
 		loadErr = caddy.Load(cfg, true)
 		if loadErr == nil {
-			chosen = try
+			chosen = &plans[i]
 			break
 		}
-		// A later reload keeps the published port. Only the first bind walks upward.
 		if p.port != 0 || !isBindError(loadErr) {
 			break
 		}
 	}
-	if chosen == 0 {
+	if chosen == nil {
 		if loadErr == nil {
-			loadErr = fmt.Errorf("no free TCP port at %s or the next %d ports", p.opts.Addr, portAttempts-1)
+			loadErr = fmt.Errorf("no free TCP port for the proxy")
 		}
 		if revErr := p.restore(); revErr != nil && !isBindError(revErr) {
 			return fmt.Errorf("proxy reload: %w; restore last config: %w", loadErr, revErr)
 		}
 		return fmt.Errorf("proxy reload: %w", loadErr)
 	}
-	p.host = host
-	p.port = chosen
+	p.host = chosen.host
+	p.port = chosen.httpPort
+	p.httpsPort = chosen.httpsPort
+	p.degraded = chosen.degraded
 	p.started = true
 	p.last = cfg
 	return nil
+}
+
+func (p *Proxy) listenPlans() ([]listenPlan, error) {
+	if strings.TrimSpace(p.opts.Addr) != "" {
+		host, port, err := parseAddr(p.opts.Addr)
+		if err != nil {
+			return nil, err
+		}
+		if port == 65535 {
+			return nil, fmt.Errorf("proxy listen address %q: no following port for HTTPS", p.opts.Addr)
+		}
+		return []listenPlan{{
+			host:      host,
+			httpPort:  port,
+			httpsPort: port + 1,
+			http:      []string{net.JoinHostPort(host, strconv.Itoa(port))},
+			https:     []string{net.JoinHostPort(host, strconv.Itoa(port+1))},
+		}}, nil
+	}
+	v6 := ipv6Loopback()
+	return []listenPlan{
+		{
+			httpPort: privilegedHTTP, httpsPort: privilegedHTTPS,
+			http: addresses("", privilegedHTTP, v6), https: addresses("", privilegedHTTPS, v6),
+		},
+		{
+			httpPort: fallbackHTTP, httpsPort: fallbackHTTPS, degraded: true,
+			http: addresses("", fallbackHTTP, v6), https: addresses("", fallbackHTTPS, v6),
+		},
+	}, nil
+}
+
+func addresses(host string, port int, ipv6 bool) []string {
+	if host != "" {
+		return []string{net.JoinHostPort(host, strconv.Itoa(port))}
+	}
+	out := []string{net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}
+	if ipv6 {
+		out = append(out, net.JoinHostPort("::1", strconv.Itoa(port)))
+	}
+	return out
+}
+
+func ipv6Loopback() bool {
+	ln, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
 }
 
 // restore puts the last good config back. Caddy keeps that config running

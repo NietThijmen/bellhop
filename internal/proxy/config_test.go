@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -166,6 +167,69 @@ func TestGolden(t *testing.T) {
 			}
 			compareGolden(t, tc.name, raw)
 		})
+	}
+}
+
+func TestSecureConfig(t *testing.T) {
+	raw, err := Build(Input{
+		HTTPListen:  []string{"127.0.0.1:8080", "[::1]:8080"},
+		HTTPSListen: []string{"127.0.0.1:8443", "[::1]:8443"},
+		HTTPSPort:   8443,
+		StorageDir:  "/var/lib/bellhop/caddy",
+		Sites: []Site{{
+			Name:   "sec",
+			Hosts:  []string{"sec.test", "www.sec.test"},
+			Secure: true,
+			Plan:   drivers.ServePlan{Driver: "static", Docroot: "/srv/sec", TryFiles: []string{"{path}", "=404"}, IndexFiles: []string{"index.html"}},
+		}, {
+			Name:  "plain",
+			Hosts: []string{"plain.test"},
+			Plan:  drivers.ServePlan{Driver: "static", Docroot: "/srv/plain", TryFiles: []string{"{path}", "=404"}, IndexFiles: []string{"index.html"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		`"install_trust": false`,
+		`"name": "bellhop"`,
+		`"certificate_authorities"`,
+		`"module": "internal"`,
+		`"ca": "bellhop"`,
+		`"automate"`,
+		"sec.test",
+		"www.sec.test",
+		"https://{http.request.host}:8443{http.request.uri}",
+		`"status_code": 308`,
+		`"127.0.0.1:80"`,
+	} {
+		if want == `"127.0.0.1:80"` {
+			if strings.Contains(text, want) {
+				t.Fatalf("config binds %s", want)
+			}
+			continue
+		}
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(text, "mail.") {
+		t.Fatal("config mentions mail")
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	tlsApp := doc["apps"].(map[string]any)["tls"].(map[string]any)
+	certs := tlsApp["certificates"].(map[string]any)["automate"].([]any)
+	for _, name := range certs {
+		if name == "plain.test" {
+			t.Fatal("plain site was issued a certificate")
+		}
+	}
+	if strings.Contains(text, `"ca": "local"`) {
+		t.Fatal("CA id is local")
 	}
 }
 

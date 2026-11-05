@@ -71,19 +71,35 @@ type instance struct {
 	done     chan error
 }
 
-// freeProxyAddr returns 127.0.0.1:<port> that is free at the moment of the call.
+// freeProxyAddr returns 127.0.0.1:<port> where <port+1> is also free.
+// The proxy serves HTTPS on the next port.
 func freeProxyAddr(t *testing.T) (addr string, port int) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 32 {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		tcp, ok := ln.Addr().(*net.TCPAddr)
+		if !ok {
+			_ = ln.Close()
+			t.Fatal("proxy listen address is not TCP")
+		}
+		next, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", tcp.Port+1))
+		if err != nil {
+			_ = ln.Close()
+			continue
+		}
+		addr = ln.Addr().String()
+		port = tcp.Port
+		_ = next.Close()
+		if err := ln.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return addr, port
 	}
-	addr = ln.Addr().String()
-	port = ln.Addr().(*net.TCPAddr).Port
-	if err := ln.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return addr, port
+	t.Fatal("no consecutive free ports for the proxy")
+	return "", 0
 }
 
 // start runs the daemon in-process with BELLHOP_HOME=home and waits until it

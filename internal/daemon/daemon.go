@@ -116,9 +116,10 @@ type daemon struct {
 	// stopBudget is the worst-case time StopAll needs for the registered
 	// services (sum of StopTimeout plus kill wait). Guarded by mu.
 	stopBudget time.Duration
-	// httpPort is the port in site URLs. Zero means DefaultHTTPPort.
-	// The proxy sets it with SetHTTPPort. Guarded by mu.
-	httpPort int
+	// httpPort and httpsPort are the ports in site URLs. Zero means the
+	// fallback ports. The proxy sets them with SetPorts. Guarded by mu.
+	httpPort  int
+	httpsPort int
 	// sitesChangeHook reloads the proxy after site changes. Nil until
 	// installed. Guarded by mu.
 	sitesChangeHook func()
@@ -207,7 +208,7 @@ func Run(ctx context.Context, opts Options) (err error) {
 		d.warn("downloads_cleanup", "could not clean up temporary downloads: "+cerr.Error(), "close programs using files in "+dirs.Downloads+" and restart the daemon")
 	}
 
-	d.SetHTTPPort(DefaultHTTPPort)
+	d.SetPorts(DefaultHTTPPort, DefaultHTTPSPort)
 	d.sites = d.newSitesManager()
 	phpMgr, err := php.New(php.Options{
 		DataDir:   dirs.Data,
@@ -235,8 +236,13 @@ func Run(ctx context.Context, opts Options) (err error) {
 		LogsDir:    logsDir,
 		StorageDir: storageDir,
 		OnReloaded: func(port int) {
-			d.SetHTTPPort(port)
-			d.bus.Publish(api.EventProxyReloaded, proxyReloaded{Port: port})
+			d.SetPorts(port, d.proxy.HTTPSPort())
+			if d.proxy.Degraded() {
+				d.warnOnce("proxy_ports",
+					fmt.Sprintf("the proxy is listening on ports %d and %d because port 80 or 443 is unavailable", d.HTTPPort(), d.HTTPSPort()),
+					"stop the program that owns port 80 or 443 and restart Bellhop")
+			}
+			d.bus.Publish(api.EventProxyReloaded, proxyReloaded{Port: port, HTTPSPort: d.HTTPSPort()})
 		},
 		OnError: func(err error) {
 			d.log.Error("proxy", "err", err)
@@ -396,6 +402,19 @@ func (d *daemon) autostart(ctx context.Context, names []string) {
 			d.warn("service_start_failed", fmt.Sprintf("service %s did not start: %v", n, err), fmt.Sprintf("run `%s logs %s` for details", version.ID, n))
 		}
 	}
+}
+
+// warnOnce records a warning the first time code is seen.
+func (d *daemon) warnOnce(code, msg, hint string) {
+	d.mu.Lock()
+	for _, w := range d.warnings {
+		if w.Code == code {
+			d.mu.Unlock()
+			return
+		}
+	}
+	d.mu.Unlock()
+	d.warn(code, msg, hint)
 }
 
 // warn records a status warning, logs it and publishes daemon.warning.

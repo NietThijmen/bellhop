@@ -11,7 +11,8 @@ import (
 
 // proxyReloaded is the Data of api.EventProxyReloaded.
 type proxyReloaded struct {
-	Port int `json:"port"`
+	Port      int `json:"port"`
+	HTTPSPort int `json:"httpsPort"`
 }
 
 // proxyError is the Data of api.EventProxyError.
@@ -48,6 +49,7 @@ func (d *daemon) proxySites(ctx context.Context) ([]proxy.Site, error) {
 		item := proxy.Site{
 			Name:    s.Name,
 			Hosts:   s.Hosts,
+			Secure:  s.Secure,
 			Plan:    s.Plan,
 			PlanErr: s.PlanErr,
 		}

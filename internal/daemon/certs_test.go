@@ -21,8 +21,12 @@ func TestCertsAPI(t *testing.T) {
 	inst := start(t, home, addr, nil)
 	ctx := testCtx(t)
 
-	if _, err := inst.client.Certs(ctx); err == nil {
-		t.Fatal("missing CA returned a certificate")
+	first, err := inst.client.Certs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.CA != certs.Authority || first.Path != certs.RootPath(home) || first.Fingerprint == "" {
+		t.Fatalf("certs = %+v", first)
 	}
 
 	writeDaemonRoot(t, home)
@@ -30,8 +34,8 @@ func TestCertsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.CA != certs.Authority || got.Path != certs.RootPath(home) || got.Fingerprint == "" {
-		t.Fatalf("certs = %+v", got)
+	if got.Fingerprint == "" || got.Fingerprint == first.Fingerprint || got.Path != first.Path {
+		t.Fatalf("replaced certs = %+v, first %s", got, first.Fingerprint)
 	}
 
 	dest := filepath.Join(t.TempDir(), "out", "root.crt")

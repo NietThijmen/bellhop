@@ -14,9 +14,13 @@ import (
 	"github.com/nietthijmen/bellhop/internal/sites"
 )
 
-// DefaultHTTPPort is the HTTP port site URLs use until the proxy binds a
-// listener and calls SetHTTPPort.
-const DefaultHTTPPort = 8080
+// DefaultHTTPPort and DefaultHTTPSPort are the fallback ports site URLs use
+// until the proxy binds and calls SetPorts. Ports 80 and 443 are omitted
+// from URLs.
+const (
+	DefaultHTTPPort  = 8080
+	DefaultHTTPSPort = 8443
+)
 
 // SetHTTPPort records the port included in site URLs. The proxy calls this
 // after it binds. A port of 0 or less restores DefaultHTTPPort. It is safe
@@ -30,7 +34,21 @@ func (d *daemon) SetHTTPPort(port int) {
 	d.mu.Unlock()
 }
 
-// HTTPPort returns the port currently used in site URLs.
+// SetPorts records the ports included in site URLs.
+func (d *daemon) SetPorts(httpPort, httpsPort int) {
+	if httpPort <= 0 {
+		httpPort = DefaultHTTPPort
+	}
+	if httpsPort <= 0 {
+		httpsPort = DefaultHTTPSPort
+	}
+	d.mu.Lock()
+	d.httpPort = httpPort
+	d.httpsPort = httpsPort
+	d.mu.Unlock()
+}
+
+// HTTPPort returns the HTTP port currently used in site URLs.
 func (d *daemon) HTTPPort() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -38,6 +56,16 @@ func (d *daemon) HTTPPort() int {
 		return DefaultHTTPPort
 	}
 	return d.httpPort
+}
+
+// HTTPSPort returns the HTTPS port currently used in site URLs.
+func (d *daemon) HTTPSPort() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.httpsPort <= 0 {
+		return DefaultHTTPSPort
+	}
+	return d.httpsPort
 }
 
 // SetSitesChangeHook installs the function called after every successful site
@@ -59,13 +87,20 @@ func (d *daemon) notifySitesChanged() {
 	}
 }
 
-// siteURL builds the primary URL of a site, including the proxy HTTP port.
+// siteURL builds the primary URL of a site. Ports 80 and 443 are omitted.
 func (d *daemon) siteURL(host string, secure bool) string {
 	scheme := "http"
+	port := d.HTTPPort()
+	omit := port == 80
 	if secure {
 		scheme = "https"
+		port = d.HTTPSPort()
+		omit = port == 443
 	}
-	return scheme + "://" + host + ":" + strconv.Itoa(d.HTTPPort())
+	if omit {
+		return scheme + "://" + host
+	}
+	return scheme + "://" + host + ":" + strconv.Itoa(port)
 }
 
 // defaultPHP is the global PHP version from settings. An empty value means
