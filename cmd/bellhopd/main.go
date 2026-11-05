@@ -14,11 +14,28 @@ import (
 	"syscall"
 
 	"github.com/nietthijmen/bellhop/internal/daemon"
+	"github.com/nietthijmen/bellhop/internal/dns"
 	"github.com/nietthijmen/bellhop/pkg/version"
 )
 
 func main() {
+	if os.Getenv(dns.EnvActive) == "1" {
+		os.Exit(runDNS(os.Stderr))
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// runDNS is the supervised resolver process. A clean shutdown exits 0 so
+// the supervisor does not treat a stop as a crash.
+func runDNS(stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	err := dns.Run(ctx, os.Getenv(dns.EnvAddr), os.Getenv(dns.EnvTLD))
+	if err != nil && !errors.Is(err, context.Canceled) {
+		_, _ = fmt.Fprintf(stderr, "%s: dns: %v\n", version.ID+"d", err)
+		return 1
+	}
+	return 0
 }
 
 func run(args []string, stdout, stderr io.Writer) int {

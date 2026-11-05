@@ -371,6 +371,11 @@ func (d *daemon) handleSettingsPatch(w http.ResponseWriter, r *http.Request) {
 	if _, ok := clean[SettingDefaultPHP]; ok {
 		d.notifySitesChanged()
 	}
+	if _, ok := clean[SettingTLD]; ok {
+		d.syncDNS(r.Context())
+	} else if _, ok := clean[SettingLocalhostMode]; ok {
+		d.syncDNS(r.Context())
+	}
 	s, err := d.settings(r.Context())
 	if err != nil {
 		d.writeErr(w, r, err)

@@ -122,6 +122,9 @@ type daemon struct {
 	// sitesChangeHook reloads the proxy after site changes. Nil until
 	// installed. Guarded by mu.
 	sitesChangeHook func()
+	// manageDNS is set when Run registered the built-in resolver. Tests
+	// that pass their own providers leave it false.
+	manageDNS bool
 }
 
 // Run starts the daemon and blocks until ctx is cancelled (normally by
@@ -247,7 +250,8 @@ func Run(ctx context.Context, opts Options) (err error) {
 
 	providers := opts.Providers
 	if providers == nil {
-		providers = []ServiceProvider{d.phpProvider()}
+		d.manageDNS = true
+		providers = []ServiceProvider{d.phpProvider(), d.dnsProvider()}
 	}
 	autostart := d.register(ctx, providers)
 
