@@ -131,6 +131,10 @@ func newRoot(opts Options) (*cobra.Command, *app) {
 		a.secureCmd(true),
 		a.secureCmd(false),
 		a.certsCmd(),
+		a.setupCmd(),
+		a.uninstallCmd(),
+		a.tldCmd(),
+		a.doctorCmd(),
 	)
 	return root, a
 }

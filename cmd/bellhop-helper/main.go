@@ -51,7 +51,7 @@ func newRoot() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	root.AddCommand(versionCmd(name), dnsCmd(), trustCmd(true), trustCmd(false), setcapCmd(), undoCmd())
+	root.AddCommand(versionCmd(name), dnsCmd(), trustCmd(true), trustCmd(false), setcapCmd(), undoCmd(), applyCmd())
 	return root
 }
 
@@ -170,6 +170,44 @@ func undoCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+func applyCmd() *cobra.Command {
+	var tld, cert, binary string
+	cmd := &cobra.Command{
+		Use:   "apply",
+		Short: "Install DNS, trust and setcap in one elevated run",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			data, err := dataDir()
+			if err != nil {
+				return err
+			}
+			if tld != "" {
+				if _, err := helper.DNS(data, tld); err != nil {
+					return err
+				}
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "dns %s\n", tld)
+			}
+			if cert != "" {
+				if _, err := helper.Trust(data, cert); err != nil {
+					return err
+				}
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "trusted certificate")
+			}
+			if binary != "" {
+				if _, err := helper.Setcap(data, binary); err != nil {
+					return err
+				}
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "setcap %s\n", binary)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&tld, "tld", "", "top-level domain to resolve locally")
+	cmd.Flags().StringVar(&cert, "cert", "", "PEM certificate to trust")
+	cmd.Flags().StringVar(&binary, "binary", "", "bellhopd path for setcap")
+	return cmd
 }
 
 func dataDir() (string, error) {

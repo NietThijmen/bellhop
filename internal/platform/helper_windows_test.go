@@ -33,3 +33,17 @@ func TestInstallResolverCommand(t *testing.T) {
 		t.Fatal("invalid tld ran a command")
 	}
 }
+
+func TestElevateScript(t *testing.T) {
+	script := ElevateScript(`C:\Program Files\bellhop-helper.exe`, []string{"apply", "--tld", "test"})
+	if !strings.Contains(script, "-Verb RunAs -Wait") || !strings.Contains(script, "'apply','--tld','test'") {
+		t.Fatalf("script %s", script)
+	}
+}
+
+func TestPortOwnerScript(t *testing.T) {
+	script := PortOwnerScript(80)
+	if !strings.Contains(script, "Get-NetTCPConnection -LocalPort 80") || !strings.Contains(script, "OwningProcess") {
+		t.Fatalf("script:\n%s", script)
+	}
+}
