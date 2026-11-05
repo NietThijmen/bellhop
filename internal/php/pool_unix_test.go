@@ -16,7 +16,7 @@ import (
 
 func TestPoolSpec(t *testing.T) {
 	m, _ := testManager(t, fixtureManifest(t))
-	if _, err := m.PoolSpec(DefaultVersion); !errors.Is(err, ErrNotInstalled) {
+	if _, err := m.PoolSpecs(DefaultVersion); !errors.Is(err, ErrNotInstalled) {
 		t.Fatalf("before install: %v", err)
 	}
 	svcs, err := m.Services(context.Background(), []string{DefaultVersion})
@@ -27,10 +27,14 @@ func TestPoolSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec, err := m.PoolSpec(DefaultVersion)
+	specs, err := m.PoolSpecs(DefaultVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(specs) != 1 {
+		t.Fatalf("specs = %d, want 1", len(specs))
+	}
+	spec := specs[0]
 	sock, err := SocketPath(m.runDir, DefaultVersion)
 	if err != nil {
 		t.Fatal(err)

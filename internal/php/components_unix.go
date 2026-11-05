@@ -2,11 +2,16 @@
 
 package php
 
+// unixPHP selects the php-cli and php-fpm archives. Windows uses one zip.
+const unixPHP = true
+
 func artifactComponents() []string {
 	return []string{ComponentCLI, ComponentFPM}
 }
 
 func primaryComponent() string { return ComponentFPM }
+
+func cgiBinaryNames() []string { return nil }
 
 func binaryNames(component string) []string {
 	switch component {

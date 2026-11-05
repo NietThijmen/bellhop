@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/nietthijmen/bellhop/internal/api"
 	"github.com/nietthijmen/bellhop/internal/ipc"
@@ -21,8 +20,8 @@ func (d *daemon) registerPHPRoutes(mux *http.ServeMux) {
 }
 
 // phpProvider supervises the default PHP pool when that version is already
-// installed. Windows has no pool in this milestone, so the provider adds
-// nothing there.
+// installed. Unix registers one php-fpm service. Windows registers one
+// php-cgi service per worker.
 func (d *daemon) phpProvider() ServiceProvider {
 	return ServiceProvider{
 		Name: "php",
@@ -144,7 +143,7 @@ func (d *daemon) phpQuery(ctx context.Context) php.Query {
 	}
 	if d.sup != nil {
 		for _, svc := range d.sup.List() {
-			line, ok := strings.CutPrefix(svc.Name, "php-")
+			line, ok := php.LineOfService(svc.Name)
 			if ok && svc.State == api.StateRunning {
 				q.Running[line] = true
 			}
@@ -153,34 +152,35 @@ func (d *daemon) phpQuery(ctx context.Context) php.Query {
 	return q
 }
 
-// ensurePHPPool registers and starts the pool for an installed version.
-// Windows has no pool yet; that is success, not a failed install.
+// ensurePHPPool registers and starts every worker for an installed version.
+// On Windows that is one php-cgi process per port. A missing Visual C++
+// runtime fails the install job before any worker starts.
 func (d *daemon) ensurePHPPool(ctx context.Context, version string) error {
-	spec, err := d.php.PoolSpec(version)
-	if errors.Is(err, php.ErrNoPool) {
-		d.log.Info("PHP installed without a pool", "version", version, "err", err)
-		return nil
-	}
+	specs, err := d.php.PoolSpecs(version)
 	if err != nil {
 		return fmt.Errorf("prepare the PHP %s pool: %w", version, err)
 	}
-	existed := false
-	for _, svc := range d.sup.List() {
-		if svc.Name == spec.Name {
-			existed = true
-			break
+	for _, spec := range specs {
+		existed := false
+		for _, svc := range d.sup.List() {
+			if svc.Name == spec.Name {
+				existed = true
+				break
+			}
+		}
+		if err := d.sup.Add(spec); err != nil {
+			return fmt.Errorf("register PHP %s pool: %w", version, err)
+		}
+		if !existed {
+			d.mu.Lock()
+			d.stopBudget += specStopBudget(spec)
+			d.mu.Unlock()
 		}
 	}
-	if err := d.sup.Add(spec); err != nil {
-		return fmt.Errorf("register PHP %s pool: %w", version, err)
-	}
-	if !existed {
-		d.mu.Lock()
-		d.stopBudget += specStopBudget(spec)
-		d.mu.Unlock()
-	}
-	if err := d.sup.Start(ctx, spec.Name); err != nil {
-		return fmt.Errorf("start PHP %s pool: %w; run `%s logs %s` for details", version, err, ver.ID, spec.Name)
+	for _, spec := range specs {
+		if err := d.sup.Start(ctx, spec.Name); err != nil {
+			return fmt.Errorf("start PHP %s pool: %w; run `%s logs %s` for details", version, err, ver.ID, spec.Name)
+		}
 	}
 	return nil
 }

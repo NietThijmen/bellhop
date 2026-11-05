@@ -66,10 +66,50 @@ func TestSocketPathAndServiceName(t *testing.T) {
 	if _, err := ServiceName("nope"); err == nil {
 		t.Fatal("invalid version was accepted")
 	}
+	name, err = WorkerName("8.3.32", 1)
+	if err != nil || name != "php-8.3-1" {
+		t.Fatalf("WorkerName = %q, %v", name, err)
+	}
+	if _, err := WorkerName("8.3", 0); err == nil {
+		t.Fatal("worker 0 was accepted")
+	}
+	ports, err := CGIPorts("8.3.36-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []int{9108, 9109, 9110, 9111} {
+		if ports[i] != want {
+			t.Fatalf("CGIPorts(8.3) = %v", ports)
+		}
+	}
+	ports, err = CGIPorts("8.1")
+	if err != nil || ports[0] != 9100 || ports[len(ports)-1] != 9103 || len(ports) != CGIWorkers {
+		t.Fatalf("CGIPorts(8.1) = %v, %v", ports, err)
+	}
+	for _, tc := range []struct {
+		name string
+		line string
+		ok   bool
+	}{
+		{name: "php-8.3", line: "8.3", ok: true},
+		{name: "php-8.3-1", line: "8.3", ok: true},
+		{name: "php-8.3-4", line: "8.3", ok: true},
+		{name: "php-8.10-2", line: "8.10", ok: true},
+		{name: "php-8.3-0"},
+		{name: "php-8.3.36-1"},
+		{name: "mariadb"},
+		{name: "php-"},
+		{name: "php-nope"},
+	} {
+		got, ok := LineOfService(tc.name)
+		if ok != tc.ok || (tc.ok && got != tc.line) {
+			t.Errorf("LineOfService(%q) = %q, %v; want %q, %v", tc.name, got, ok, tc.line, tc.ok)
+		}
+	}
 }
 
 func TestComponentsMatchOS(t *testing.T) {
-	if poolsSupported {
+	if unixPHP {
 		if primaryComponent() != ComponentFPM {
 			t.Fatalf("primary = %s", primaryComponent())
 		}
@@ -436,7 +476,7 @@ func assertMonotonic(t *testing.T, seen []int64) {
 }
 
 func newestPatch() string {
-	if poolsSupported {
+	if unixPHP {
 		return "8.3.32"
 	}
 	return "8.3.36-1"
@@ -487,17 +527,18 @@ func (f *fakeInstaller) Install(ctx context.Context, e artifacts.Entry, progress
 		progress(4, 4, "installed "+e.Component+" "+e.Version)
 	}
 	dir := f.InstallDir(e.Component, e.Version)
-	names := binaryNames(e.Component)
-	rel := "php"
-	if len(names) > 0 {
-		rel = names[0]
+	names := append(append([]string{}, binaryNames(e.Component)...), cgiBinaryNames()...)
+	if len(names) == 0 {
+		names = []string{"php"}
 	}
-	dest := filepath.Join(dir, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(dest, []byte("fake-php"), 0o700); err != nil {
-		return "", err
+	for _, rel := range names {
+		dest := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(dest, []byte("fake-php"), 0o700); err != nil {
+			return "", err
+		}
 	}
 	return dir, nil
 }
@@ -510,7 +551,7 @@ func fixtureManifest(t *testing.T) *artifacts.Manifest {
 		docs = append(docs, `{"component":"`+comp+`","version":"`+ver+`","os":"`+goos+`","arch":"`+arch+
 			`","url":"https://example.invalid/`+comp+`","sha256":"`+sha+`","format":"`+format+`","stripPrefix":""}`)
 	}
-	if poolsSupported {
+	if unixPHP {
 		for _, ver := range []string{"8.1.34", "8.3.30", "8.3.32", "8.4.23", "8.5.8"} {
 			add(ComponentCLI, ver, runtime.GOOS, "tar.gz")
 			add(ComponentFPM, ver, runtime.GOOS, "tar.gz")

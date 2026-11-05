@@ -1,5 +1,6 @@
 // Package php installs one PHP version from the embedded artifact manifest
-// and, on macOS and Linux, prepares a single php-fpm master for the supervisor.
+// and prepares a supervisor pool: one php-fpm master on macOS and Linux, or
+// four php-cgi workers on Windows.
 //
 // Binaries are installed only through artifacts.Installer, so they land in
 // InstallDir: <data>/php-cli/<patch> and <data>/php-fpm/<patch> on macOS and
@@ -14,7 +15,7 @@
 //
 // This package does not import internal/daemon. Hold a *Manager in the daemon
 // and pass Manager.Services results to the supervisor provider. See Service
-// and PoolSpec for the spec fields to copy onto daemon.Service.
+// and PoolSpecs for the spec fields to copy onto daemon.Service.
 package php
 
 import (
@@ -67,9 +68,17 @@ var (
 	ErrNotInstalled = errors.New("PHP version is not installed")
 	// ErrUnknown means the version is not in the manifest for this OS and arch.
 	ErrUnknown = errors.New("unknown PHP version")
-	// ErrNoPool means this OS has no php-fpm pool in this milestone.
-	ErrNoPool = errors.New("php-fpm is not available on this operating system")
 )
+
+// CGIWorkers is the number of php-cgi processes one Windows PHP line runs.
+// Each process is its own supervisor service, so one recycle does not drop
+// the others. Unix pools are a single php-fpm master and do not use this.
+const CGIWorkers = 4
+
+// CGIPortBase is the first Windows php-cgi listen port. Line 8.1 uses
+// CGIPortBase through CGIPortBase+CGIWorkers-1. Each later minor version
+// takes the next block of CGIWorkers ports (8.3 is 9108–9111).
+const CGIPortBase = 9100
 
 // ArtifactInstaller is the subset of *artifacts.Installer this package uses.
 type ArtifactInstaller interface {
@@ -113,7 +122,8 @@ type InstallResult struct {
 	FPM     string `json:"fpm,omitempty"`
 }
 
-// Service is one php-fpm master for the daemon to register.
+// Service is one pool process for the daemon to register: a php-fpm master,
+// or one Windows php-cgi worker.
 // Autostart is true; the daemon should clear it when store.ServiceConfig
 // for Spec.Name exists and Enabled is false. A missing row stays enabled.
 type Service struct {
@@ -232,12 +242,85 @@ func SocketPath(runDir, version string) (string, error) {
 }
 
 // ServiceName is the supervisor service name for a PHP line, "php-8.3".
+// On Windows each php-cgi worker appends "-<n>" (n starts at 1).
 func ServiceName(version string) (string, error) {
 	line, err := Line(version)
 	if err != nil {
 		return "", err
 	}
 	return "php-" + line, nil
+}
+
+// WorkerName is the supervisor service name of one Windows php-cgi worker.
+// n starts at 1. Unix pools use ServiceName and have no worker suffix.
+func WorkerName(version string, n int) (string, error) {
+	base, err := ServiceName(version)
+	if err != nil {
+		return "", err
+	}
+	if n < 1 {
+		return "", fmt.Errorf("PHP worker index must be at least 1")
+	}
+	return base + "-" + strconv.Itoa(n), nil
+}
+
+// LineOfService reports the catalog line a PHP supervisor service belongs to.
+// "php-8.3" and "php-8.3-2" both return "8.3". Other names return ok=false.
+func LineOfService(name string) (string, bool) {
+	rest, found := strings.CutPrefix(name, "php-")
+	if !found || rest == "" {
+		return "", false
+	}
+	line, err := Line(rest)
+	if err != nil {
+		return "", false
+	}
+	if rest == line {
+		return line, true
+	}
+	suffix, ok := strings.CutPrefix(rest, line+"-")
+	if !ok || suffix == "" {
+		return "", false
+	}
+	n, err := strconv.Atoi(suffix)
+	if err != nil || strconv.Itoa(n) != suffix || n < 1 {
+		return "", false
+	}
+	return line, true
+}
+
+// CGIPorts returns the Windows php-cgi listen ports for a version.
+// The block is CGIPortBase+(minor-1)*CGIWorkers, CGIWorkers ports long.
+func CGIPorts(version string) ([]int, error) {
+	line, err := Line(version)
+	if err != nil {
+		return nil, err
+	}
+	minor, err := lineMinor(line)
+	if err != nil {
+		return nil, err
+	}
+	if minor < 1 {
+		return nil, fmt.Errorf("PHP %s has no php-cgi port block", line)
+	}
+	base := CGIPortBase + (minor-1)*CGIWorkers
+	ports := make([]int, CGIWorkers)
+	for i := range ports {
+		ports[i] = base + i
+	}
+	return ports, nil
+}
+
+func lineMinor(line string) (int, error) {
+	_, minor, ok := strings.Cut(line, ".")
+	if !ok {
+		return 0, fmt.Errorf("%q is not a PHP line", line)
+	}
+	n, err := strconv.Atoi(minor)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%q is not a PHP line", line)
+	}
+	return n, nil
 }
 
 // ConfigDir is the directory that holds php.ini, conf.d and php-fpm.conf
@@ -340,32 +423,26 @@ func (m *Manager) Install(ctx context.Context, version string, progress artifact
 // Services returns a pool for each installed version in lines.
 // A line that is in the catalog but not installed is skipped, so the daemon
 // can ask for DefaultVersion before anyone has run Install. An unknown
-// version is an error. On Windows, Services returns nil, nil: php-fpm is a
-// later milestone, and Windows still installs the zip through Install.
+// version is an error. Unix returns one service per line. Windows returns
+// CGIWorkers services per line.
 //
-// M2 registers one pool. Call Services(ctx, []string{DefaultVersion}).
+// Call Services(ctx, []string{DefaultVersion}) to register the default pool.
 func (m *Manager) Services(ctx context.Context, lines []string) ([]Service, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !poolsSupported {
-		for _, version := range lines {
-			if _, _, err := m.resolve(version); err != nil {
-				return nil, err
-			}
-		}
-		return nil, nil
-	}
 	var out []Service
 	for _, version := range lines {
-		spec, err := m.PoolSpec(version)
+		specs, err := m.PoolSpecs(version)
 		if errors.Is(err, ErrNotInstalled) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, Service{Spec: spec, Autostart: true})
+		for _, spec := range specs {
+			out = append(out, Service{Spec: spec, Autostart: true})
+		}
 	}
 	return out, nil
 }
