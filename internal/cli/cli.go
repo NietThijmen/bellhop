@@ -135,6 +135,11 @@ func newRoot(opts Options) (*cobra.Command, *app) {
 		a.uninstallCmd(),
 		a.tldCmd(),
 		a.doctorCmd(),
+		a.isolateCmd(),
+		a.unisolateCmd(),
+		a.useCmd(),
+		a.phpCmd(),
+		a.composerCmd(),
 	)
 	return root, a
 }
@@ -150,7 +155,7 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 		opts.Stderr = os.Stderr
 	}
 	root, a := newRoot(opts)
-	root.SetArgs(args)
+	root.SetArgs(passthroughArgs(args))
 	root.SetOut(opts.Stdout)
 	root.SetErr(opts.Stderr)
 	err := root.ExecuteContext(ctx)
@@ -158,6 +163,9 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 		return ExitOK
 	}
 	r := describe(err)
+	if r.msg == "" && r.hint == "" {
+		return r.exit
+	}
 	if a.json {
 		_ = writeJSON(opts.Stdout, api.ErrorResponse{Error: api.Error{Code: r.code, Message: r.msg, Hint: r.hint}}, true)
 	} else {
@@ -196,6 +204,10 @@ var unreachableHint = fmt.Sprintf("Start it: run '%sd' in a terminal, or '%s set
 	version.ID, version.ID)
 
 func describe(err error) rendered {
+	var se *silentExit
+	if errors.As(err, &se) {
+		return rendered{exit: se.code}
+	}
 	var ee *ExitError
 	if errors.As(err, &ee) {
 		r := describe(ee.Err)

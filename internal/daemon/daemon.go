@@ -220,6 +220,7 @@ func Run(ctx context.Context, opts Options) (err error) {
 		return fmt.Errorf("load the PHP catalog: %w; this is a %s build bug, reinstall or report it", err, version.Name)
 	}
 	d.php = phpMgr
+	d.writePHPShims()
 	if err := os.MkdirAll(filepath.Join(dirs.Logs, "sites"), 0o700); err != nil {
 		return fmt.Errorf("create site log directory: %w; check that %s is writable", err, dirs.Logs)
 	}

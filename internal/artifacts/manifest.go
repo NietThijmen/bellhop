@@ -27,6 +27,8 @@ const (
 	FormatZip   = "zip"
 	FormatTarGz = "tar.gz"
 	FormatTarXz = "tar.xz"
+	// FormatFile stores the download as one file named by the URL's base name.
+	FormatFile = "file"
 )
 
 // Entry describes one downloadable artifact for one OS/arch.
@@ -110,9 +112,9 @@ func (e Entry) Validate() error {
 		return fmt.Errorf("%s %s: sha256 %q is not a 64-character hex digest", e.Component, e.Version, e.SHA256)
 	}
 	switch e.Format {
-	case FormatZip, FormatTarGz, FormatTarXz:
+	case FormatZip, FormatTarGz, FormatTarXz, FormatFile:
 	default:
-		return fmt.Errorf("%s %s: unsupported format %q (want zip, tar.gz or tar.xz)", e.Component, e.Version, e.Format)
+		return fmt.Errorf("%s %s: unsupported format %q (want zip, tar.gz, tar.xz or file)", e.Component, e.Version, e.Format)
 	}
 	return nil
 }

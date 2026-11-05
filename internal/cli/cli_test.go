@@ -907,30 +907,15 @@ func TestSiteCommandsRegistered(t *testing.T) {
 	if !root.ContainsGroup(groupSites) || !root.ContainsGroup(groupPHP) {
 		t.Errorf("groups = %v, want sites and php", root.Groups())
 	}
-	for _, name := range []string{"isolate", "unisolate", "use", "php"} {
-		if _, ok := got[name]; ok {
-			t.Errorf("command %s is registered", name)
+	for _, name := range []string{"isolate", "unisolate", "use", "php", "composer"} {
+		c, ok := got[name]
+		if !ok {
+			t.Errorf("command %s is not registered", name)
+			continue
 		}
-	}
-}
-
-func TestPHPCommandsStayUnregistered(t *testing.T) {
-	addr := testAddr(t) // unknown commands must not dial the daemon
-	for _, args := range [][]string{
-		{"isolate", "8.3"},
-		{"unisolate"},
-		{"use", "8.3"},
-		{"php", "list"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			r := run(testCtx(t), addr, args...)
-			if r.code != ExitUser {
-				t.Fatalf("exit %d, want %d (stderr %q)", r.code, ExitUser, r.stderr)
-			}
-			if !strings.Contains(r.stderr, "unknown command") {
-				t.Errorf("stderr %q, want an unknown-command error", r.stderr)
-			}
-		})
+		if c.GroupID != groupPHP {
+			t.Errorf("%s group %q, want %q", name, c.GroupID, groupPHP)
+		}
 	}
 }
 

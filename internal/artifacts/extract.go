@@ -42,6 +42,15 @@ func extract(ctx context.Context, f *os.File, size int64, format, stripPrefix, r
 	switch format {
 	case FormatZip:
 		err = x.zip(f, size)
+	case FormatFile:
+		if _, err = f.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		name := "download"
+		if base := filepath.Base(stripPrefix); base != "" && base != "." && base != "/" {
+			name = base
+		}
+		err = x.writeFile(name, 0o644, f)
 	case FormatTarGz, FormatTarXz:
 		if _, err = f.Seek(0, io.SeekStart); err != nil {
 			return err

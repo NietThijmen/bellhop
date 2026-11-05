@@ -10,6 +10,7 @@ import (
 	"github.com/nietthijmen/bellhop/internal/ipc"
 	"github.com/nietthijmen/bellhop/internal/jobs"
 	"github.com/nietthijmen/bellhop/internal/php"
+	"github.com/nietthijmen/bellhop/internal/shim"
 	"github.com/nietthijmen/bellhop/internal/store"
 	ver "github.com/nietthijmen/bellhop/pkg/version"
 )
@@ -269,6 +270,26 @@ func (d *daemon) phpQuery(ctx context.Context) php.Query {
 		}
 	}
 	return q
+}
+
+// writePHPShims refreshes the launchers in the data bin directory.
+func (d *daemon) writePHPShims() {
+	if d.php == nil {
+		return
+	}
+	lines, err := d.php.Lines()
+	if err != nil {
+		d.log.Warn("list PHP lines for shims", "err", err)
+		return
+	}
+	exe, err := shim.BellhopExe()
+	if err != nil {
+		d.log.Warn("find bellhop for shims", "err", err)
+		return
+	}
+	if err := shim.Write(d.dirs.Bin, exe, lines); err != nil {
+		d.log.Warn("write PHP shims", "err", err)
+	}
 }
 
 // effectivePHP is the version an unpinned site uses: the setting, or 8.3.

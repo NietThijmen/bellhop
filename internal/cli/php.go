@@ -100,15 +100,20 @@ func (a *app) useCmd() *cobra.Command {
 }
 
 func (a *app) phpCmd() *cobra.Command {
+	var pin string
 	cmd := &cobra.Command{
-		Use:     "php",
-		Short:   "List, install and remove PHP versions",
+		Use:     "php [args...]",
+		Short:   "Run PHP, or list, install and remove versions",
 		GroupID: groupPHP,
-		Args:    noArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
+		Args:    cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 && pin == "" {
+				return cmd.Help()
+			}
+			return a.forwardTool(cmd, pin, args, false)
 		},
 	}
+	cmd.Flags().StringVar(&pin, "use", "", "PHP line to run instead of the site in the current directory")
 	cmd.AddCommand(a.phpListCmd(), a.phpInstallCmd(), a.phpRemoveCmd())
 	return cmd
 }

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -342,6 +343,42 @@ func (m *Manager) UserIni(version string) (string, error) {
 		return "", err
 	}
 	return userIniPath(dir), nil
+}
+
+// Lines is every catalog line for this OS, newest patch first in manifest order.
+func (m *Manager) Lines() ([]string, error) {
+	got, err := m.available()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(got))
+	for i, l := range got {
+		out[i] = l.line
+	}
+	return out, nil
+}
+
+// ComposerComponent and ComposerVersion are the manifest row for composer.phar.
+const (
+	ComposerComponent = "composer"
+	ComposerVersion   = "2.2"
+)
+
+// EnsureComposer installs composer.phar on first use and returns its path.
+func (m *Manager) EnsureComposer(ctx context.Context) (string, error) {
+	e, ok := m.manifest.Find(ComposerComponent, ComposerVersion, m.goos, m.goarch)
+	if !ok {
+		return "", fmt.Errorf("composer %s is not in the manifest for %s/%s", ComposerVersion, m.goos, m.goarch)
+	}
+	dir := m.inst.InstallDir(e.Component, e.Version)
+	if !m.inst.Installed(e.Component, e.Version) {
+		var err error
+		dir, err = m.inst.Install(ctx, e, nil)
+		if err != nil {
+			return "", err
+		}
+	}
+	return filepath.Join(dir, "composer.phar"), nil
 }
 
 // Catalog lists every PHP line published for this OS and architecture,
