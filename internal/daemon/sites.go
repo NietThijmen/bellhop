@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/nietthijmen/bellhop/internal/api"
 	"github.com/nietthijmen/bellhop/internal/ipc"
@@ -79,6 +80,11 @@ func (d *daemon) SetSitesChangeHook(fn func()) {
 }
 
 func (d *daemon) notifySitesChanged() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := d.syncPHPPools(ctx); err != nil && d.log != nil {
+		d.log.Error("sync php pools", "err", err)
+	}
 	d.mu.Lock()
 	fn := d.sitesChangeHook
 	d.mu.Unlock()

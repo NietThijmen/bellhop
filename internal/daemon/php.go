@@ -21,14 +21,18 @@ func (d *daemon) registerPHPRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(api.RoutePHPDefault, d.handlePHPDefault)
 }
 
-// phpProvider supervises the default PHP pool when that version is already
-// installed. Unix registers one php-fpm service. Windows registers one
-// php-cgi service per worker.
+// phpProvider supervises the default PHP line and every installed line a
+// site isolates to. Unix registers one php-fpm service per line. Windows
+// registers one php-cgi service per worker.
 func (d *daemon) phpProvider() ServiceProvider {
 	return ServiceProvider{
 		Name: "php",
 		Services: func(ctx context.Context, _ Env) ([]Service, error) {
-			got, err := d.php.Services(ctx, []string{php.DefaultVersion})
+			lines, err := d.phpLines(ctx)
+			if err != nil {
+				return nil, err
+			}
+			got, err := d.php.Services(ctx, lines)
 			if err != nil {
 				return nil, err
 			}
@@ -99,7 +103,7 @@ func (d *daemon) handlePHPInstall(w http.ResponseWriter, r *http.Request) {
 		if err := d.store.AddPHPVersion(ctx, store.PHPVersion{Version: res.Version, Path: res.Path}); err != nil {
 			return nil, fmt.Errorf("record installed PHP %s: %w", res.Version, err)
 		}
-		if err := d.ensurePHPPool(ctx, res.Version); err != nil {
+		if err := d.syncPHPPools(ctx); err != nil {
 			return nil, err
 		}
 		return res, nil
@@ -267,6 +271,81 @@ func (d *daemon) phpQuery(ctx context.Context) php.Query {
 	return q
 }
 
+// effectivePHP is the version an unpinned site uses: the setting, or 8.3.
+func (d *daemon) effectivePHP(ctx context.Context) string {
+	if v := d.defaultPHP(ctx); v != "" {
+		return v
+	}
+	return php.DefaultVersion
+}
+
+// phpLines is the default line plus every version a site isolates to.
+// An empty default setting uses 8.3. Callers still skip lines that are
+// not installed.
+func (d *daemon) phpLines(ctx context.Context) ([]string, error) {
+	def := d.defaultPHP(ctx)
+	if def == "" {
+		def = php.DefaultVersion
+	}
+	lines := []string{def}
+	if d.store == nil {
+		return lines, nil
+	}
+	rows, err := d.store.ListSites(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{def: true}
+	for _, s := range rows {
+		if s.PHPVersion == "" || seen[s.PHPVersion] {
+			continue
+		}
+		seen[s.PHPVersion] = true
+		lines = append(lines, s.PHPVersion)
+	}
+	return lines, nil
+}
+
+// syncPHPPools starts each installed line that a site or the default needs
+// and stops a line that nothing needs anymore.
+func (d *daemon) syncPHPPools(ctx context.Context) error {
+	if d == nil || d.sup == nil || d.php == nil {
+		return nil
+	}
+	lines, err := d.phpLines(ctx)
+	if err != nil {
+		return err
+	}
+	need := map[string]bool{}
+	for _, line := range lines {
+		known, installed, err := d.phpKnown(line)
+		if err != nil {
+			return err
+		}
+		if !known || !installed {
+			continue
+		}
+		need[line] = true
+		if err := d.ensurePHPPool(ctx, line); err != nil {
+			return err
+		}
+	}
+	var drop []string
+	for _, svc := range d.sup.List() {
+		line, ok := php.LineOfService(svc.Name)
+		if !ok || need[line] {
+			continue
+		}
+		drop = append(drop, svc.Name)
+	}
+	for _, name := range drop {
+		if err := d.sup.Remove(ctx, name); err != nil {
+			return fmt.Errorf("stop PHP %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // ensurePHPPool registers and starts every worker for an installed version.
 // On Windows that is one php-cgi process per port. A missing Visual C++
 // runtime fails the install job before any worker starts.
@@ -275,13 +354,19 @@ func (d *daemon) ensurePHPPool(ctx context.Context, version string) error {
 	if err != nil {
 		return fmt.Errorf("prepare the PHP %s pool: %w", version, err)
 	}
+	listed := d.sup.List()
 	for _, spec := range specs {
 		existed := false
-		for _, svc := range d.sup.List() {
-			if svc.Name == spec.Name {
-				existed = true
-				break
+		running := false
+		for _, svc := range listed {
+			if svc.Name != spec.Name {
+				continue
 			}
+			existed = true
+			running = svc.State == api.StateRunning
+		}
+		if running {
+			continue
 		}
 		if err := d.sup.Add(spec); err != nil {
 			return fmt.Errorf("register PHP %s pool: %w", version, err)
@@ -291,8 +376,6 @@ func (d *daemon) ensurePHPPool(ctx context.Context, version string) error {
 			d.stopBudget += specStopBudget(spec)
 			d.mu.Unlock()
 		}
-	}
-	for _, spec := range specs {
 		if err := d.sup.Start(ctx, spec.Name); err != nil {
 			return fmt.Errorf("start PHP %s pool: %w; run `%s logs %s` for details", version, err, ver.ID, spec.Name)
 		}

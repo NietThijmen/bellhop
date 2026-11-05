@@ -56,7 +56,7 @@ func (d *daemon) proxySites(ctx context.Context) ([]proxy.Site, error) {
 		if s.Plan.PHP && s.PlanErr == nil {
 			ver := s.PHP
 			if ver == "" {
-				ver = php.DefaultVersion
+				ver = d.effectivePHP(ctx)
 			}
 			dials, err := php.PoolDials(d.dirs.Run, ver)
 			if err != nil {

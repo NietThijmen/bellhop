@@ -5,6 +5,7 @@ package proxy
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -86,6 +87,65 @@ func TestDriverFixtures(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Log("php-fpm is not part of this milestone on Windows; PHP fixtures were checked for /.env only")
 	}
+}
+
+// TestPinnedPHPLines serves two hosts through FastCGI stand-ins. Each
+// stand-in returns the PHP line that host is pinned to, the way phpversion()
+// would on a real pool.
+func TestPinnedPHPLines(t *testing.T) {
+	one := listenVersion(t, "8.1")
+	two := listenVersion(t, "8.3")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.php"), []byte("<?php echo phpversion();"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := drivers.ServePlan{
+		Driver:          "laravel",
+		Docroot:         dir,
+		PHP:             true,
+		FrontController: "/index.php",
+		TryFiles:        []string{"{path}", "{path}/", "/index.php?{query}"},
+		IndexFiles:      []string{"index.php"},
+	}
+	p := New(Options{Addr: freeAddr(t)})
+	if err := p.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	if err := p.Reload(context.Background(), []Site{
+		{Name: "one", Hosts: []string{"one.localhost"}, Plan: plan, Sockets: []string{one}},
+		{Name: "two", Hosts: []string{"two.localhost"}, Plan: plan, Sockets: []string{two}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	base := "http://127.0.0.1:" + strconv.Itoa(p.Port()) + "/"
+	if body := getBody(t, client, base, "one.localhost"); body != "8.1" {
+		t.Fatalf("one.localhost = %q", body)
+	}
+	if body := getBody(t, client, base, "two.localhost"); body != "8.3" {
+		t.Fatalf("two.localhost = %q", body)
+	}
+}
+
+func listenVersion(t *testing.T, version string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = serveFCGI(conn, version)
+			_ = conn.Close()
+		}
+	}()
+	return ln.Addr().String()
 }
 
 func getStatus(t *testing.T, client *http.Client, url, host string) int {
