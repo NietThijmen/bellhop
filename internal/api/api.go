@@ -44,7 +44,8 @@ const (
 	RoutePHPRemove  = "DELETE " + Prefix + "/php/{version}"
 	RoutePHPDefault = "POST " + Prefix + "/php/default" // body: PHPDefaultRequest
 
-	RouteDBInstall = "POST " + Prefix + "/db/install" // 202 JobRef
+	RouteDBInstall   = "POST " + Prefix + "/db/install" // 202 JobRef
+	RouteDBProvision = "POST " + Prefix + "/sites/{name}/db/provision"
 
 	RouteCerts       = "GET " + Prefix + "/certs"
 	RouteCertsExport = "POST " + Prefix + "/certs/export"
@@ -350,6 +351,25 @@ type JobDoneEvent struct {
 // WarningEvent is the Data of EventDaemonWarning.
 type WarningEvent struct {
 	Warning Warning `json:"warning"`
+}
+
+// DBProvisionRequest is the body of POST /v1/sites/{name}/db/provision.
+type DBProvisionRequest struct {
+	Write    bool   `json:"write"`
+	Database string `json:"database,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+
+// DBProvision is the result of a provision request.
+type DBProvision struct {
+	Wrote    bool   `json:"wrote"`
+	Diff     string `json:"diff,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Host     string `json:"host,omitempty"`
+	Port     string `json:"port,omitempty"`
+	Database string `json:"database,omitempty"`
+	Username string `json:"username,omitempty"`
 }
 
 // NewEvent marshals data into an Event (ID and Time are set by the bus).

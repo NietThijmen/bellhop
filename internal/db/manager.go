@@ -180,6 +180,17 @@ func (m *Manager) ApplyRootPassword(ctx context.Context, password string) error 
 	return err
 }
 
+// Exec runs one statement as root. interpolateParams lets placeholders carry passwords.
+func (m *Manager) Exec(ctx context.Context, query string, args ...any) error {
+	db, err := sql.Open("mysql", m.dsn("true"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, query, args...)
+	return err
+}
+
 // Shutdown asks MariaDB to stop. Windows uses this because there is no signal.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	db, err := sql.Open("mysql", m.dsn(""))

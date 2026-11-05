@@ -94,6 +94,13 @@ func (c *Client) RemovePHP(ctx context.Context, version string) error {
 	return c.Do(ctx, http.MethodDelete, api.Prefix+"/php/"+url.PathEscape(version), nil, nil)
 }
 
+// ProvisionDB asks the daemon to create a site database.
+func (c *Client) ProvisionDB(ctx context.Context, name string, req api.DBProvisionRequest) (api.DBProvision, error) {
+	var out api.DBProvision
+	err := c.Do(ctx, http.MethodPost, api.Prefix+"/sites/"+url.PathEscape(name)+"/db/provision", req, &out)
+	return out, err
+}
+
 // InstallDB starts the MariaDB install job.
 func (c *Client) InstallDB(ctx context.Context) (api.JobRef, error) {
 	var ref api.JobRef
