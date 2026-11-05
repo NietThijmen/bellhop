@@ -48,6 +48,7 @@ func (d *daemon) handler() http.Handler {
 
 	d.registerSiteRoutes(mux)
 	d.registerPHPRoutes(mux)
+	d.registerCertRoutes(mux)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		ipc.WriteError(w, http.StatusNotFound, api.Error{

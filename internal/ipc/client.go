@@ -228,6 +228,20 @@ func (c *Client) Events(ctx context.Context, lastID uint64) (<-chan api.Event, <
 	return evs, errc
 }
 
+// Certs returns GET /v1/certs.
+func (c *Client) Certs(ctx context.Context) (api.Certs, error) {
+	var out api.Certs
+	err := c.Do(ctx, http.MethodGet, api.Prefix+"/certs", nil, &out)
+	return out, err
+}
+
+// ExportCert copies the local CA root. An empty path returns the PEM only.
+func (c *Client) ExportCert(ctx context.Context, path string) (api.CertExport, error) {
+	var out api.CertExport
+	err := c.Do(ctx, http.MethodPost, api.Prefix+"/certs/export", api.CertExportRequest{Path: path}, &out)
+	return out, err
+}
+
 // Status returns GET /v1/status.
 func (c *Client) Status(ctx context.Context) (api.Status, error) {
 	var s api.Status

@@ -100,6 +100,21 @@ func notFound(w http.ResponseWriter, what string) {
 
 func (f *fakeDaemon) handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc(api.RouteCerts, func(w http.ResponseWriter, _ *http.Request) {
+		ipc.WriteJSON(w, http.StatusOK, api.Certs{
+			CA: "bellhop", Path: `C:\ca\root.crt`, Fingerprint: "abc",
+			Expires: t0.Add(365 * 24 * time.Hour), Trusted: false,
+		})
+	})
+	mux.HandleFunc(api.RouteCertsExport, func(w http.ResponseWriter, r *http.Request) {
+		var req api.CertExportRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		ipc.WriteJSON(w, http.StatusOK, api.CertExport{
+			Certs:   api.Certs{CA: "bellhop", Fingerprint: "abc"},
+			PEM:     "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+			Written: req.Path,
+		})
+	})
 	mux.HandleFunc(api.RouteStatus, func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()

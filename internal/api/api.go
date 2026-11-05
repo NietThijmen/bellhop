@@ -43,6 +43,9 @@ const (
 	RoutePHPInstall = "POST " + Prefix + "/php/{version}/install" // 202 JobRef
 	RoutePHPRemove  = "DELETE " + Prefix + "/php/{version}"
 	RoutePHPDefault = "POST " + Prefix + "/php/default" // body: PHPDefaultRequest
+
+	RouteCerts       = "GET " + Prefix + "/certs"
+	RouteCertsExport = "POST " + Prefix + "/certs/export"
 )
 
 // ServiceAll is the pseudo service name meaning "every service" for
@@ -245,6 +248,30 @@ type SitePatch struct {
 	Driver  *string   `json:"driver,omitempty"`
 	Docroot *string   `json:"docroot,omitempty"`
 	Aliases *[]string `json:"aliases,omitempty"`
+}
+
+// ---------------------------------------------------------------- certs
+
+// Certs describes the local CA root.
+type Certs struct {
+	CA          string    `json:"ca"`
+	Path        string    `json:"path"`
+	Fingerprint string    `json:"fingerprint"`
+	Expires     time.Time `json:"expires"`
+	Trusted     bool      `json:"trusted"`
+}
+
+// CertExportRequest is the body of POST /v1/certs/export.
+// Path is an absolute file the daemon copies the public root PEM to.
+type CertExportRequest struct {
+	Path string `json:"path,omitempty"`
+}
+
+// CertExport is the response of POST /v1/certs/export.
+type CertExport struct {
+	Certs
+	PEM     string `json:"pem"`
+	Written string `json:"written,omitempty"`
 }
 
 // ---------------------------------------------------------------- php
