@@ -12,6 +12,59 @@ func joinSocket(runDir, line string) string {
 	return filepath.Join(runDir, "php-"+line+".sock")
 }
 
+// Remove deletes an installed PHP build. conf.d/99-user.ini is kept beside
+// the install so the next install of this line still has it. writePHPConfig
+// will not overwrite that file once it is back in conf.d.
+func (m *Manager) Remove(version string) error {
+	line, patch, err := m.resolve(version)
+	if err != nil {
+		return err
+	}
+	if !m.allInstalled(patch) {
+		return fmt.Errorf("remove PHP %s: %w", line, ErrNotInstalled)
+	}
+	dir := m.inst.InstallDir(primaryComponent(), patch)
+	if saved, err := os.ReadFile(userIniPath(dir)); err == nil {
+		keep := m.keptUserIni(line)
+		if err := os.MkdirAll(filepath.Dir(keep), 0o755); err != nil {
+			return fmt.Errorf("keep PHP %s user ini: %w", line, err)
+		}
+		if err := os.WriteFile(keep, saved, 0o644); err != nil {
+			return fmt.Errorf("keep PHP %s user ini: %w", line, err)
+		}
+	}
+	for _, c := range artifactComponents() {
+		if err := os.RemoveAll(m.inst.InstallDir(c, patch)); err != nil {
+			return fmt.Errorf("remove PHP %s: %w", line, err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) keptUserIni(line string) string {
+	return filepath.Join(m.dataDir, "php-user", line, FileUserIni)
+}
+
+// restoreUserIni puts a kept 99-user.ini back before writePHPConfig runs.
+// An existing file in the install is left alone.
+func (m *Manager) restoreUserIni(dir, line string) error {
+	saved, err := os.ReadFile(m.keptUserIni(line))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	dest := userIniPath(dir)
+	if _, err := os.Stat(dest); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dest, saved, 0o644)
+}
+
 func userIniPath(dir string) string {
 	return filepath.Join(dir, "conf.d", FileUserIni)
 }

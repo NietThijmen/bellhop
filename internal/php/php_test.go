@@ -572,3 +572,38 @@ func fixtureManifest(t *testing.T) *artifacts.Manifest {
 	}
 	return &man
 }
+
+func TestRemoveKeepsUserIni(t *testing.T) {
+	m, _ := testManager(t, fixtureManifest(t))
+	res, err := m.Install(context.Background(), DefaultVersion, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const keep = "; keep me\n"
+	user := userIniPath(res.Path)
+	if err := os.WriteFile(user, []byte(keep), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(res.Path, filepath.FromSlash(binaryNames(primaryComponent())[0]))
+	if err := m.Remove(DefaultVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(bin); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("binary still present: %v", err)
+	}
+	if err := m.Remove(DefaultVersion); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("second remove = %v", err)
+	}
+	kept, err := os.ReadFile(m.keptUserIni(DefaultVersion))
+	if err != nil || string(kept) != keep {
+		t.Fatalf("kept user ini = %q, %v", kept, err)
+	}
+	again, err := m.Install(context.Background(), DefaultVersion, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(userIniPath(again.Path))
+	if err != nil || string(got) != keep {
+		t.Fatalf("reinstall user ini = %q, %v", got, err)
+	}
+}

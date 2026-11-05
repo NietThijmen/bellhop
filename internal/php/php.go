@@ -412,6 +412,9 @@ func (m *Manager) Install(ctx context.Context, version string, progress artifact
 	if err := m.installEntries(ctx, entries, progress); err != nil {
 		return InstallResult{}, err
 	}
+	if err := m.restoreUserIni(dir, line); err != nil {
+		return InstallResult{}, fmt.Errorf("install PHP %s: %w", line, err)
+	}
 	if err := writePHPConfig(dir, m.timezone); err != nil {
 		return InstallResult{}, fmt.Errorf("install PHP %s: %w", line, err)
 	}

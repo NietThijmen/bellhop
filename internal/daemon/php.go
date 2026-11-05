@@ -17,6 +17,8 @@ import (
 func (d *daemon) registerPHPRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(api.RoutePHP, d.handlePHP)
 	mux.HandleFunc(api.RoutePHPInstall, d.handlePHPInstall)
+	mux.HandleFunc(api.RoutePHPRemove, d.handlePHPRemove)
+	mux.HandleFunc(api.RoutePHPDefault, d.handlePHPDefault)
 }
 
 // phpProvider supervises the default PHP pool when that version is already
@@ -107,6 +109,119 @@ func (d *daemon) handlePHPInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ipc.WriteJSON(w, http.StatusAccepted, api.JobRef{JobID: id})
+}
+
+func (d *daemon) handlePHPRemove(w http.ResponseWriter, r *http.Request) {
+	line, err := php.Line(r.PathValue("version"))
+	if err != nil {
+		d.writeErr(w, r, badRequest(err.Error(), "use a version such as 8.3"))
+		return
+	}
+	def := d.defaultPHP(r.Context())
+	if def == "" {
+		def = php.DefaultVersion
+	}
+	if line == def {
+		d.writeErr(w, r, &api.Error{
+			Code:    api.CodeConflict,
+			Message: fmt.Sprintf("PHP %s is the default version", line),
+			Hint:    "set another default with POST /v1/php/default first",
+		})
+		return
+	}
+	rows, err := d.store.ListSites(r.Context())
+	if err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	for _, s := range rows {
+		if s.PHPVersion == line {
+			d.writeErr(w, r, &api.Error{
+				Code:    api.CodeConflict,
+				Message: fmt.Sprintf("site %s is isolated to PHP %s", s.Name, line),
+				Hint:    "switch that site to another PHP version, or unisolate it, then remove this one",
+			})
+			return
+		}
+	}
+	known, installed, err := d.phpKnown(line)
+	if err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	if !known {
+		d.writeErr(w, r, &api.Error{Code: api.CodeNotFound, Message: fmt.Sprintf("PHP %s is not in the catalog", line)})
+		return
+	}
+	if !installed {
+		d.writeErr(w, r, &api.Error{Code: api.CodeNotFound, Message: fmt.Sprintf("PHP %s is not installed", line), Hint: "GET /v1/php lists installed versions"})
+		return
+	}
+	if err := d.stopPHPPool(r.Context(), line); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	if err := d.php.Remove(line); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	if err := d.store.RemovePHPVersion(r.Context(), line); err != nil && !errors.Is(err, store.ErrNotFound) {
+		d.writeErr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d *daemon) handlePHPDefault(w http.ResponseWriter, r *http.Request) {
+	var req api.PHPDefaultRequest
+	if err := d.readJSON(w, r, &req, `send {"version":"8.3"}`); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	line, err := php.Line(req.Version)
+	if err != nil {
+		d.writeErr(w, r, badRequest(err.Error(), "use a version such as 8.3"))
+		return
+	}
+	_, installed, err := d.phpKnown(line)
+	if err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	if !installed {
+		d.writeErr(w, r, &api.Error{
+			Code:    api.CodeNotFound,
+			Message: fmt.Sprintf("PHP %s is not installed", line),
+			Hint:    "install it before making it the default",
+		})
+		return
+	}
+	if err := d.store.SetSetting(r.Context(), SettingDefaultPHP, line); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	d.notifySitesChanged()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d *daemon) stopPHPPool(ctx context.Context, line string) error {
+	specs, err := d.php.PoolSpecs(line)
+	if err != nil {
+		return err
+	}
+	running := map[string]bool{}
+	for _, svc := range d.sup.List() {
+		running[svc.Name] = true
+	}
+	for _, spec := range specs {
+		if !running[spec.Name] {
+			continue
+		}
+		if err := d.sup.Remove(ctx, spec.Name); err != nil {
+			return fmt.Errorf("stop PHP %s: %w", line, err)
+		}
+	}
+	return nil
 }
 
 func (d *daemon) phpKnown(line string) (known, installed bool, err error) {
