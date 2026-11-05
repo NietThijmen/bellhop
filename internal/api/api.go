@@ -44,6 +44,8 @@ const (
 	RoutePHPRemove  = "DELETE " + Prefix + "/php/{version}"
 	RoutePHPDefault = "POST " + Prefix + "/php/default" // body: PHPDefaultRequest
 
+	RouteDBInstall = "POST " + Prefix + "/db/install" // 202 JobRef
+
 	RouteCerts       = "GET " + Prefix + "/certs"
 	RouteCertsExport = "POST " + Prefix + "/certs/export"
 )

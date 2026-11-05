@@ -13,9 +13,10 @@ import (
 // Setting keys known to the daemon. Only these may be read or written over
 // the API; anything else in the store is ignored.
 const (
-	SettingTLD           = "tld"
-	SettingLocalhostMode = "localhost_mode"
-	SettingDefaultPHP    = "default_php"
+	SettingTLD                 = "tld"
+	SettingLocalhostMode       = "localhost_mode"
+	SettingDefaultPHP          = "default_php"
+	SettingMariaDBRootPassword = "mariadb_root_password"
 )
 
 type settingDef struct {
@@ -24,9 +25,10 @@ type settingDef struct {
 }
 
 var settingDefs = map[string]settingDef{
-	SettingTLD:           {def: "test", normalize: normalizeTLD},
-	SettingLocalhostMode: {def: "false", normalize: normalizeBool},
-	SettingDefaultPHP:    {def: "", normalize: normalizePHPVersion},
+	SettingTLD:                 {def: "test", normalize: normalizeTLD},
+	SettingLocalhostMode:       {def: "false", normalize: normalizeBool},
+	SettingDefaultPHP:          {def: "", normalize: normalizePHPVersion},
+	SettingMariaDBRootPassword: {def: "", normalize: normalizeSecret},
 }
 
 // SettingKeys returns the known setting keys, sorted.
@@ -72,6 +74,13 @@ func normalizeBool(v string) (string, error) {
 		return "false", nil
 	}
 	return "", fmt.Errorf("%q is not a boolean: use true or false", v)
+}
+
+func normalizeSecret(v string) (string, error) {
+	if strings.ContainsAny(v, "\r\n") {
+		return "", fmt.Errorf("the MariaDB root password cannot contain a newline")
+	}
+	return v, nil
 }
 
 func normalizePHPVersion(v string) (string, error) {

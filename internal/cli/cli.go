@@ -81,6 +81,7 @@ func (a *app) client() (*ipc.Client, error) {
 const (
 	groupSites = "sites"
 	groupPHP   = "php"
+	groupDB    = "db"
 )
 
 // NewRootCommand builds the command tree. The returned app-level state is
@@ -112,6 +113,7 @@ func newRoot(opts Options) (*cobra.Command, *app) {
 	root.AddGroup(
 		&cobra.Group{ID: groupSites, Title: "Site Commands:"},
 		&cobra.Group{ID: groupPHP, Title: "PHP Commands:"},
+		&cobra.Group{ID: groupDB, Title: "Database Commands:"},
 	)
 	root.AddCommand(
 		a.statusCmd(),
@@ -140,6 +142,7 @@ func newRoot(opts Options) (*cobra.Command, *app) {
 		a.useCmd(),
 		a.phpCmd(),
 		a.composerCmd(),
+		a.dbCmd(),
 	)
 	return root, a
 }

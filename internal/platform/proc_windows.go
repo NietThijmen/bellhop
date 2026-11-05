@@ -167,3 +167,11 @@ func ProcessAlive(pid int) bool {
 	}
 	return code == stillActive
 }
+
+// HideWindow keeps a console program from opening its own window.
+func HideWindow(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_NO_WINDOW
+}

@@ -94,6 +94,13 @@ func (c *Client) RemovePHP(ctx context.Context, version string) error {
 	return c.Do(ctx, http.MethodDelete, api.Prefix+"/php/"+url.PathEscape(version), nil, nil)
 }
 
+// InstallDB starts the MariaDB install job.
+func (c *Client) InstallDB(ctx context.Context) (api.JobRef, error) {
+	var ref api.JobRef
+	err := c.Do(ctx, http.MethodPost, api.Prefix+"/db/install", nil, &ref)
+	return ref, err
+}
+
 // SetDefaultPHP makes version the global default PHP version.
 func (c *Client) SetDefaultPHP(ctx context.Context, version string) error {
 	if version == "" {

@@ -53,3 +53,6 @@ func ProcessAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
+
+// HideWindow is a no-op on Unix, where the process inherits the terminal.
+func HideWindow(cmd *exec.Cmd) { _ = cmd }

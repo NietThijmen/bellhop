@@ -16,6 +16,7 @@ import (
 
 	"github.com/nietthijmen/bellhop/internal/api"
 	"github.com/nietthijmen/bellhop/internal/artifacts"
+	"github.com/nietthijmen/bellhop/internal/db"
 	"github.com/nietthijmen/bellhop/internal/events"
 	"github.com/nietthijmen/bellhop/internal/ipc"
 	"github.com/nietthijmen/bellhop/internal/jobs"
@@ -107,6 +108,7 @@ type daemon struct {
 	artifacts *artifacts.Installer
 	sites     *sites.Manager
 	php       *php.Manager
+	maria     *db.Manager
 	proxy     *proxy.Proxy
 	started   time.Time
 	heartbeat time.Duration
@@ -221,6 +223,17 @@ func Run(ctx context.Context, opts Options) (err error) {
 	}
 	d.php = phpMgr
 	d.writePHPShims()
+	maria, err := db.New(db.Options{
+		DataDir:   dirs.Data,
+		RunDir:    dirs.Run,
+		LogDir:    dirs.Logs,
+		Installer: d.artifacts,
+		Logger:    logger.With("component", "db"),
+	})
+	if err != nil {
+		return fmt.Errorf("prepare MariaDB: %w", err)
+	}
+	d.maria = maria
 	if err := os.MkdirAll(filepath.Join(dirs.Logs, "sites"), 0o700); err != nil {
 		return fmt.Errorf("create site log directory: %w; check that %s is writable", err, dirs.Logs)
 	}
@@ -258,7 +271,7 @@ func Run(ctx context.Context, opts Options) (err error) {
 	providers := opts.Providers
 	if providers == nil {
 		d.manageDNS = true
-		providers = []ServiceProvider{d.phpProvider(), d.dnsProvider()}
+		providers = []ServiceProvider{d.phpProvider(), d.dnsProvider(), d.dbProvider()}
 	}
 	autostart := d.register(ctx, providers)
 

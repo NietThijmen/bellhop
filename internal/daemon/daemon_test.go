@@ -317,7 +317,7 @@ func TestDaemonIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PatchSettings: %v", err)
 	}
-	want := api.Settings{"tld": "dev", "localhost_mode": "true", "default_php": ""}
+	want := api.Settings{"tld": "dev", "localhost_mode": "true", "default_php": "", "mariadb_root_password": ""}
 	if fmt.Sprint(s) != fmt.Sprint(want) {
 		t.Errorf("PatchSettings = %v, want %v", s, want)
 	}
