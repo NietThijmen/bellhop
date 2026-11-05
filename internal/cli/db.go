@@ -18,7 +18,7 @@ func (a *app) dbCmd() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(a.dbInstallCmd(), a.dbProvisionCmd())
+	cmd.AddCommand(a.dbInstallCmd(), a.dbProvisionCmd(), a.dbListCmd(), a.dbCreateCmd(), a.dbDropCmd(), a.dbImportCmd(), a.dbExportCmd(), a.dbMigrateCmd())
 	return cmd
 }
 
@@ -109,4 +109,118 @@ func (a *app) dbInstallCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func (a *app) dbListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "list", Short: "List databases with size and table count", Args: noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			list, err := c.Databases(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if a.json {
+				return writeJSON(cmd.OutOrStdout(), list, true)
+			}
+			for _, db := range list {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\t%d bytes\t%d tables\n", db.Name, db.Bytes, db.Tables)
+			}
+			return nil
+		},
+	}
+}
+
+func (a *app) dbCreateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "create <name>", Short: "Create an empty database", Args: exactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			return c.CreateDB(cmd.Context(), args[0])
+		},
+	}
+}
+
+func (a *app) dbDropCmd() *cobra.Command {
+	var confirm string
+	cmd := &cobra.Command{
+		Use: "drop <name>", Short: "Drop a database", Args: exactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			return c.DropDB(cmd.Context(), args[0], confirm)
+		},
+	}
+	cmd.Flags().StringVar(&confirm, "confirm", "", "the database name, repeated, to allow the drop")
+	return cmd
+}
+
+func (a *app) dbImportCmd() *cobra.Command {
+	var database string
+	cmd := &cobra.Command{
+		Use: "import <file>", Short: "Stream a .sql or .sql.gz file into a database", Args: exactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			return c.ImportDB(cmd.Context(), args[0], database)
+		},
+	}
+	cmd.Flags().StringVar(&database, "database", "", "database to import into")
+	return cmd
+}
+
+func (a *app) dbExportCmd() *cobra.Command {
+	var database string
+	cmd := &cobra.Command{
+		Use: "export <file>", Short: "Stream a gzip dump of a database", Args: exactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			return c.ExportDB(cmd.Context(), args[0], database)
+		},
+	}
+	cmd.Flags().StringVar(&database, "database", "", "database to export")
+	return cmd
+}
+
+func (a *app) dbMigrateCmd() *cobra.Command {
+	var site string
+	var yes bool
+	cmd := &cobra.Command{
+		Use: "migrate", Short: "Run php artisan migrate for a site", Args: noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !yes {
+				return fmt.Errorf("refusing to migrate until you pass --yes")
+			}
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			name, err := siteName(cmd, c, site)
+			if err != nil {
+				return err
+			}
+			ref, err := c.Migrate(cmd.Context(), name)
+			if err != nil {
+				return err
+			}
+			_, err = a.waitJob(cmd, c, ref)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&site, "site", "", "site name")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm that migrations should run")
+	return cmd
 }

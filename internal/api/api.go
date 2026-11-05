@@ -45,7 +45,13 @@ const (
 	RoutePHPDefault = "POST " + Prefix + "/php/default" // body: PHPDefaultRequest
 
 	RouteDBInstall   = "POST " + Prefix + "/db/install" // 202 JobRef
+	RouteDBList      = "GET " + Prefix + "/db"
+	RouteDBCreate    = "POST " + Prefix + "/db"
+	RouteDBDrop      = "DELETE " + Prefix + "/db/{name}"
+	RouteDBImport    = "POST " + Prefix + "/db/import"
+	RouteDBExport    = "POST " + Prefix + "/db/export"
 	RouteDBProvision = "POST " + Prefix + "/sites/{name}/db/provision"
+	RouteSiteMigrate = "POST " + Prefix + "/sites/{name}/migrate"
 
 	RouteCerts       = "GET " + Prefix + "/certs"
 	RouteCertsExport = "POST " + Prefix + "/certs/export"
@@ -351,6 +357,24 @@ type JobDoneEvent struct {
 // WarningEvent is the Data of EventDaemonWarning.
 type WarningEvent struct {
 	Warning Warning `json:"warning"`
+}
+
+// DBNameRequest names a database to create.
+type DBNameRequest struct {
+	Name string `json:"name"`
+}
+
+// DBFileRequest is an import or export path on this machine.
+type DBFileRequest struct {
+	Path     string `json:"path"`
+	Database string `json:"database"`
+}
+
+// DBInfo is one database reported by GET /v1/db.
+type DBInfo struct {
+	Name   string `json:"name"`
+	Bytes  int64  `json:"bytes"`
+	Tables int    `json:"tables"`
 }
 
 // DBProvisionRequest is the body of POST /v1/sites/{name}/db/provision.

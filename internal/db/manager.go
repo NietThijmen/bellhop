@@ -180,6 +180,41 @@ func (m *Manager) ApplyRootPassword(ctx context.Context, password string) error 
 	return err
 }
 
+// Databases lists user databases with size and table count.
+func (m *Manager) Databases(ctx context.Context) ([]struct {
+	Name   string
+	Bytes  int64
+	Tables int
+}, error) {
+	conn, err := sql.Open("mysql", m.dsn(""))
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	rows, err := conn.QueryContext(ctx, `SELECT table_schema, COALESCE(SUM(data_length+index_length),0), COUNT(table_name) FROM information_schema.tables WHERE table_schema NOT IN ('mysql','information_schema','performance_schema','sys') GROUP BY table_schema`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []struct {
+		Name   string
+		Bytes  int64
+		Tables int
+	}
+	for rows.Next() {
+		var item struct {
+			Name   string
+			Bytes  int64
+			Tables int
+		}
+		if err := rows.Scan(&item.Name, &item.Bytes, &item.Tables); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 // Exec runs one statement as root. interpolateParams lets placeholders carry passwords.
 func (m *Manager) Exec(ctx context.Context, query string, args ...any) error {
 	db, err := sql.Open("mysql", m.dsn("true"))

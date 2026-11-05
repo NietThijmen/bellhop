@@ -94,6 +94,40 @@ func (c *Client) RemovePHP(ctx context.Context, version string) error {
 	return c.Do(ctx, http.MethodDelete, api.Prefix+"/php/"+url.PathEscape(version), nil, nil)
 }
 
+// Databases lists user databases.
+func (c *Client) Databases(ctx context.Context) ([]api.DBInfo, error) {
+	var out []api.DBInfo
+	err := c.Do(ctx, http.MethodGet, api.Prefix+"/db", nil, &out)
+	return out, err
+}
+
+// CreateDB creates an empty database.
+func (c *Client) CreateDB(ctx context.Context, name string) error {
+	return c.Do(ctx, http.MethodPost, api.Prefix+"/db", api.DBNameRequest{Name: name}, nil)
+}
+
+// DropDB drops a database when confirm equals name.
+func (c *Client) DropDB(ctx context.Context, name, confirm string) error {
+	return c.Do(ctx, http.MethodDelete, api.Prefix+"/db/"+url.PathEscape(name)+"?confirm="+url.QueryEscape(confirm), nil, nil)
+}
+
+// ImportDB streams a .sql or .sql.gz file into a database.
+func (c *Client) ImportDB(ctx context.Context, path, database string) error {
+	return c.Do(ctx, http.MethodPost, api.Prefix+"/db/import", api.DBFileRequest{Path: path, Database: database}, nil)
+}
+
+// ExportDB writes a gzip dump of a database.
+func (c *Client) ExportDB(ctx context.Context, path, database string) error {
+	return c.Do(ctx, http.MethodPost, api.Prefix+"/db/export", api.DBFileRequest{Path: path, Database: database}, nil)
+}
+
+// Migrate starts php artisan migrate for a site.
+func (c *Client) Migrate(ctx context.Context, name string) (api.JobRef, error) {
+	var ref api.JobRef
+	err := c.Do(ctx, http.MethodPost, api.Prefix+"/sites/"+url.PathEscape(name)+"/migrate", map[string]any{}, &ref)
+	return ref, err
+}
+
 // ProvisionDB asks the daemon to create a site database.
 func (c *Client) ProvisionDB(ctx context.Context, name string, req api.DBProvisionRequest) (api.DBProvision, error) {
 	var out api.DBProvision

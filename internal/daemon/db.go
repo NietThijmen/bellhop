@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/nietthijmen/bellhop/internal/api"
@@ -13,6 +14,7 @@ import (
 	"github.com/nietthijmen/bellhop/internal/envfile"
 	"github.com/nietthijmen/bellhop/internal/ipc"
 	"github.com/nietthijmen/bellhop/internal/jobs"
+	"github.com/nietthijmen/bellhop/internal/platform"
 	"github.com/nietthijmen/bellhop/internal/store"
 )
 
@@ -21,6 +23,12 @@ const jobDBInstall = "db.install"
 func (d *daemon) registerDBRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(api.RouteDBInstall, d.handleDBInstall)
 	mux.HandleFunc(api.RouteDBProvision, d.handleDBProvision)
+	mux.HandleFunc(api.RouteDBList, d.handleDBList)
+	mux.HandleFunc(api.RouteDBCreate, d.handleDBCreate)
+	mux.HandleFunc(api.RouteDBDrop, d.handleDBDrop)
+	mux.HandleFunc(api.RouteDBImport, d.handleDBImport)
+	mux.HandleFunc(api.RouteDBExport, d.handleDBExport)
+	mux.HandleFunc(api.RouteSiteMigrate, d.handleSiteMigrate)
 }
 
 func (d *daemon) dbProvider() ServiceProvider {
@@ -174,4 +182,120 @@ func (d *daemon) ensureMariaDB(ctx context.Context) error {
 		return err
 	}
 	return d.sup.Start(ctx, spec.Name)
+}
+
+func (d *daemon) handleDBList(w http.ResponseWriter, r *http.Request) {
+	list, err := d.maria.Databases(r.Context())
+	if err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	out := make([]api.DBInfo, 0, len(list))
+	for _, item := range list {
+		out = append(out, api.DBInfo{Name: item.Name, Bytes: item.Bytes, Tables: item.Tables})
+	}
+	ipc.WriteJSON(w, http.StatusOK, out)
+}
+
+func (d *daemon) handleDBCreate(w http.ResponseWriter, r *http.Request) {
+	var req api.DBNameRequest
+	if err := d.readJSON(w, r, &req, `send {"name":"shop"}`); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	if err := db.CheckIdent(req.Name); err != nil {
+		d.writeErr(w, r, badRequest(err.Error(), "use letters, digits, underscore, '$' or '-'"))
+		return
+	}
+	if err := db.Provision(r.Context(), d.maria, db.Creds{Database: req.Name, Username: "root"}); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d *daemon) handleDBDrop(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := db.ConfirmDrop(name, r.URL.Query().Get("confirm")); err != nil {
+		d.writeErr(w, r, badRequest(err.Error(), "pass ?confirm= with the same database name"))
+		return
+	}
+	if err := d.maria.Exec(r.Context(), "DROP DATABASE "+"`"+name+"`"); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d *daemon) handleDBImport(w http.ResponseWriter, r *http.Request) {
+	var req api.DBFileRequest
+	if err := d.readJSON(w, r, &req, `send {"path":"dump.sql.gz","database":"shop"}`); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	f, gzipped, err := db.OpenSQL(req.Path)
+	if err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	defer f.Close()
+	client := platform.MariaDBClient(d.maria.Layout().InstallDir)
+	if err := db.Import(r.Context(), client, db.ClientArgs(d.maria.Layout().Port, req.Database), f, gzipped); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d *daemon) handleDBExport(w http.ResponseWriter, r *http.Request) {
+	var req api.DBFileRequest
+	if err := d.readJSON(w, r, &req, `send {"path":"dump.sql.gz","database":"shop"}`); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	f, err := os.Create(req.Path)
+	if err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	defer f.Close()
+	dump := platform.MariaDBDump(d.maria.Layout().InstallDir)
+	if err := db.Export(r.Context(), dump, db.ClientArgs(d.maria.Layout().Port, req.Database), f); err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d *daemon) handleSiteMigrate(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	site, err := d.sites.Get(r.Context(), name)
+	if err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	id, err := d.jobs.Start("db.migrate", func(ctx context.Context, h *jobs.Handle) (any, error) {
+		ver := site.PHP
+		if ver == "" {
+			ver = d.effectivePHP(ctx)
+		}
+		bin, err := d.php.CLIBinary(ver)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.CommandContext(ctx, bin, db.MigrateArgs()...)
+		cmd.Dir = site.Path
+		cmd.Stdout = h.LogWriter()
+		cmd.Stderr = h.LogWriter()
+		platform.HideWindow(cmd)
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("php artisan migrate: %w", err)
+		}
+		return nil, nil
+	})
+	if err != nil {
+		d.writeErr(w, r, err)
+		return
+	}
+	ipc.WriteJSON(w, http.StatusAccepted, api.JobRef{JobID: id})
 }
