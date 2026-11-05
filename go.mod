@@ -9,6 +9,7 @@ require (
 	github.com/caddyserver/caddy/v2 v2.11.7
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/miekg/dns v1.1.73
+	github.com/smallstep/truststore v0.13.0
 	github.com/spf13/cobra v1.10.2
 	github.com/ulikunitz/xz v0.5.15
 	golang.org/x/sys v0.49.0
@@ -109,7 +110,6 @@ require (
 	github.com/smallstep/nosql v0.8.0 // indirect
 	github.com/smallstep/pkcs7 v0.2.3 // indirect
 	github.com/smallstep/scep v0.0.0-20260331191114-261f960a40d1 // indirect
-	github.com/smallstep/truststore v0.13.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
