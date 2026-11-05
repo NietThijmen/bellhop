@@ -4,8 +4,7 @@
 *.test
 *.out
 coverage.*
-.idea/workspace.xml
-.idea/shelf/
+.idea/
 node_modules/
 cmd/bellhop-app/frontend/dist/
 cmd/bellhop-app/build/bin/
