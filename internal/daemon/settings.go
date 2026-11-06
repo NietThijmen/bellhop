@@ -16,7 +16,7 @@ const (
 	SettingTLD                 = "tld"
 	SettingLocalhostMode       = "localhost_mode"
 	SettingDefaultPHP          = "default_php"
-	SettingMariaDBRootPassword = "mariadb_root_password"
+	SettingMariaDBRootPassword = "mariadb_root_password" //nolint:gosec // G101: the setting key, not a credential
 )
 
 type settingDef struct {

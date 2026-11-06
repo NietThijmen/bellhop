@@ -194,7 +194,7 @@ func waitClosed(host string, port int) error {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		conn, err := (&net.Dialer{Timeout: 200 * time.Millisecond}).DialContext(context.Background(), "tcp", addr)
 		if err != nil {
 			return nil
 		}
@@ -326,7 +326,7 @@ func addresses(host string, port int, ipv6 bool) []string {
 }
 
 func ipv6Loopback() bool {
-	ln, err := net.Listen("tcp", "[::1]:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "[::1]:0")
 	if err != nil {
 		return false
 	}

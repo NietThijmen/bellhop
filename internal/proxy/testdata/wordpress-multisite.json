@@ -89,6 +89,7 @@
                       "terminal": true
                     },
                     {
+                      "group": "rw_wordpress",
                       "handle": [
                         {
                           "handler": "rewrite",
@@ -116,6 +117,7 @@
                       ]
                     },
                     {
+                      "group": "rw_wordpress",
                       "handle": [
                         {
                           "handler": "rewrite",

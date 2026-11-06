@@ -56,7 +56,7 @@ func Update(path string, keys []string, values map[string]string) ([]Change, err
 	existed := err == nil
 	next, changes := Apply(body, keys, values)
 	if existed {
-		if err := os.WriteFile(path+BackupSuffix, body, 0o600); err != nil {
+		if err := os.WriteFile(path+BackupSuffix, body, 0o600); err != nil { //nolint:gosec // G703: path is a site .env the daemon resolved itself
 			return nil, fmt.Errorf("back up %s: %w", path, err)
 		}
 	}
@@ -88,11 +88,6 @@ func Apply(body []byte, keys []string, values map[string]string) ([]byte, []Chan
 				continue
 			}
 			lines[i] = replaceLine(line, val)
-			end := ending(line)
-			if end == "" {
-				// keep a bare last line without inventing a newline yet
-			}
-			_ = end
 			changes = append(changes, Change{Key: key, Old: old, New: val})
 			found = true
 			break

@@ -88,11 +88,7 @@ func TestCGIRecycle(t *testing.T) {
 		TryFiles:        []string{"{path}", "{path}/", "/index.php?{query}"},
 		IndexFiles:      []string{"index.php"},
 	}
-	p := New(Options{Addr: freeAddr(t)})
-	if err := p.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = p.Close() })
+	p := startProxy(t, Options{})
 	if err := p.Reload(context.Background(), []Site{{
 		Name:    "app",
 		Hosts:   []string{"app.localhost"},

@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -41,7 +42,7 @@ func editUserPath(edit func([]string) []string) error {
 	}
 	defer func() { _ = key.Close() }()
 	current, _, err := key.GetStringValue("Path")
-	if err != nil && err != registry.ErrNotExist {
+	if err != nil && !errors.Is(err, registry.ErrNotExist) {
 		return fmt.Errorf("read user PATH: %w", err)
 	}
 	parts := splitPath(current)

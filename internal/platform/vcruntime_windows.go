@@ -42,7 +42,7 @@ func CheckVCRuntime(path string, need VCRedist) error {
 	}
 	major, minor, err := fileVersion(path)
 	if err != nil {
-		return fmt.Errorf("%w (%s): %s", ErrVCRedistMissing, err, redistHint(need))
+		return fmt.Errorf("%w (%w): %s", ErrVCRedistMissing, err, redistHint(need))
 	}
 	if !versionOK(major, minor, need) {
 		return fmt.Errorf("%w: found %s %d.%d, need %s", ErrVCRedistMissing, vcRuntimeDLL, major, minor, redistHint(need))
@@ -88,12 +88,12 @@ func fileVersion(path string) (major, minor int, err error) {
 		return 0, 0, fmt.Errorf("%s has no version resource", path)
 	}
 	buf := make([]byte, size)
-	if err := windows.GetFileVersionInfo(path, 0, size, unsafe.Pointer(&buf[0])); err != nil {
+	if err := windows.GetFileVersionInfo(path, 0, size, unsafe.Pointer(&buf[0])); err != nil { //nolint:gosec // G103: Win32 API buffer
 		return 0, 0, err
 	}
 	var info *windows.VS_FIXEDFILEINFO
 	var n uint32
-	if err := windows.VerQueryValue(unsafe.Pointer(&buf[0]), `\`, unsafe.Pointer(&info), &n); err != nil {
+	if err := windows.VerQueryValue(unsafe.Pointer(&buf[0]), `\`, unsafe.Pointer(&info), &n); err != nil { //nolint:gosec // G103: Win32 API buffer
 		return 0, 0, err
 	}
 	if info == nil || n < uint32(unsafe.Sizeof(*info)) {

@@ -55,8 +55,8 @@ type ServePlan struct {
 	// Allow lists request-path patterns (same syntax as Deny) that are exempt
 	// from Deny, e.g. "/.well-known/*" while every other dotfile is denied.
 	Allow []string `json:"allow,omitempty"`
-	// Rewrites are applied in order before TryFiles, each to the result of
-	// the previous one. Drivers write them so that this gives the same
-	// result as stopping at the first match (nginx "rewrite ... last").
+	// Rewrites are tried in order before TryFiles and only the first rule
+	// that matches is applied (nginx "rewrite ... last"); the proxy puts
+	// them in one Caddy route group to get that behaviour.
 	Rewrites []Rewrite `json:"rewrites,omitempty"`
 }

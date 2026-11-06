@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -48,8 +49,8 @@ func errorAs(err error, target **api.Error) bool {
 	if err == nil {
 		return false
 	}
-	ae, ok := err.(*api.Error)
-	if !ok {
+	var ae *api.Error
+	if !errors.As(err, &ae) {
 		return false
 	}
 	*target = ae

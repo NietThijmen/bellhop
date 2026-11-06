@@ -53,10 +53,10 @@ func InstallResolver(tld string) (ResolverChange, error) {
 		return ResolverChange{}, err
 	}
 	path, body, reload := linuxDNSFile(kind, tld)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // system config dir under /etc, read by non-root daemons
 		return ResolverChange{}, fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil { //nolint:gosec // read by systemd-resolved / dnsmasq running as their own users
 		return ResolverChange{}, fmt.Errorf("write %s: %w", path, err)
 	}
 	out, err := CommandOutput(reload[0], reload[1:]...)

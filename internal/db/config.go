@@ -2,6 +2,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -66,7 +67,7 @@ func PickPort() (int, bool) {
 }
 
 func portFree(port int) bool {
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
 		return false
 	}

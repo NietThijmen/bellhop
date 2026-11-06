@@ -15,10 +15,10 @@ func InstallAutostart(binary string) error {
 		return err
 	}
 	path := filepath.Join(dir, "systemd", "user", AutostartTask()+".service")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // standard ~/.config/systemd/user mode
 		return err
 	}
-	if err := os.WriteFile(path, []byte(SystemdUserUnit(binary)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(SystemdUserUnit(binary)), 0o644); err != nil { //nolint:gosec // systemd unit files are conventionally 0644
 		return err
 	}
 	out, err := CommandOutput("systemctl", "--user", "enable", "--now", AutostartTask()+".service")

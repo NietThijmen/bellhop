@@ -14,7 +14,7 @@ func shimPath(dir, name string) string {
 }
 
 func writeOne(dir, name, body string) error {
-	return os.WriteFile(shimPath(dir, name), []byte(body), 0o644)
+	return os.WriteFile(shimPath(dir, name), []byte(body), 0o600)
 }
 
 func quote(s string) string {

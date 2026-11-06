@@ -83,18 +83,13 @@ func TestServe(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(logs) })
 
 	var reloaded int
-	p := New(Options{
-		Addr:    freeAddr(t),
+	p := startProxy(t, Options{
 		LogsDir: logs,
 		OnReloaded: func(int) {
 			reloaded++
 		},
 	})
-	t.Cleanup(func() { _ = p.Close() })
 	ctx := context.Background()
-	if err := p.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
 	if err := p.Reload(ctx, []Site{
 		{Name: "static", Hosts: []string{"static.localhost", "*.static.localhost"}, Plan: staticPlan},
 		{Name: "rewrite", Hosts: []string{"rewrite.localhost"}, Plan: rewritePlan},
@@ -308,13 +303,10 @@ func TestSecureRedirect(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	p := New(Options{Addr: freeAddr(t)})
-	if err := p.Close(); err != nil {
-		t.Fatal(err)
+	if err := New(Options{Addr: freeAddr(t)}).Close(); err != nil {
+		t.Fatalf("Close before Start: %v", err)
 	}
-	if err := p.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	p := startProxy(t, Options{})
 	port := p.Port()
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
@@ -351,17 +343,49 @@ func freePair(t *testing.T) string {
 	return ""
 }
 
+// freeAddr returns 127.0.0.1:<port> where both port and port+1 (the proxy's
+// HTTPS port) were free a moment ago. Another process can still take them
+// before the proxy binds, so tests that start a proxy use startProxy.
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 20 {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		next, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port+1))
+		_ = ln.Close()
+		if err != nil {
+			continue
+		}
+		_ = next.Close()
+		return fmt.Sprintf("127.0.0.1:%d", port)
 	}
-	addr := ln.Addr().String()
-	if err := ln.Close(); err != nil {
-		t.Fatal(err)
+	t.Fatal("no free pair of adjacent ports found")
+	return ""
+}
+
+// startProxy starts a proxy with opts on a free port pair, retrying with new
+// ports when a bind loses the race with another process. The proxy is
+// closed when the test ends.
+func startProxy(t *testing.T, opts Options) *Proxy {
+	t.Helper()
+	var err error
+	for range 5 {
+		opts.Addr = freeAddr(t)
+		p := New(opts)
+		if err = p.Start(context.Background()); err == nil {
+			t.Cleanup(func() { _ = p.Close() })
+			return p
+		}
+		_ = p.Close()
+		if !strings.Contains(err.Error(), "listen") {
+			break
+		}
 	}
-	return addr
+	t.Fatal(err)
+	return nil
 }
 
 func writeFile(t *testing.T, path, content string) {

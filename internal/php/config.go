@@ -26,10 +26,10 @@ func (m *Manager) Remove(version string) error {
 	dir := m.inst.InstallDir(primaryComponent(), patch)
 	if saved, err := os.ReadFile(userIniPath(dir)); err == nil {
 		keep := m.keptUserIni(line)
-		if err := os.MkdirAll(filepath.Dir(keep), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(keep), 0o750); err != nil {
 			return fmt.Errorf("keep PHP %s user ini: %w", line, err)
 		}
-		if err := os.WriteFile(keep, saved, 0o644); err != nil {
+		if err := os.WriteFile(keep, saved, 0o600); err != nil { //nolint:gosec // G703: path under Bellhop's own data dir
 			return fmt.Errorf("keep PHP %s user ini: %w", line, err)
 		}
 	}
@@ -59,10 +59,10 @@ func (m *Manager) restoreUserIni(dir, line string) error {
 	if _, err := os.Stat(dest); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(dest, saved, 0o644)
+	return os.WriteFile(dest, saved, 0o600) //nolint:gosec // G703: path under Bellhop's own PHP install dir
 }
 
 func userIniPath(dir string) string {
