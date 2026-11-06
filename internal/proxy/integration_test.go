@@ -57,11 +57,7 @@ func TestDriverFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := New(Options{Addr: freeAddr(t)})
-	if err := p.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = p.Close() })
+	p := startProxy(t, Options{})
 	if err := p.Reload(context.Background(), []Site{
 		{Name: "laravel", Hosts: []string{"laravel.localhost"}, Plan: laravelPlan, Socket: "127.0.0.1:1"},
 		{Name: "wp", Hosts: []string{"wp.localhost"}, Plan: wpPlan, Socket: "127.0.0.1:1"},
@@ -107,11 +103,7 @@ func TestPinnedPHPLines(t *testing.T) {
 		TryFiles:        []string{"{path}", "{path}/", "/index.php?{query}"},
 		IndexFiles:      []string{"index.php"},
 	}
-	p := New(Options{Addr: freeAddr(t)})
-	if err := p.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = p.Close() })
+	p := startProxy(t, Options{})
 	if err := p.Reload(context.Background(), []Site{
 		{Name: "one", Hosts: []string{"one.localhost"}, Plan: plan, Sockets: []string{one}},
 		{Name: "two", Hosts: []string{"two.localhost"}, Plan: plan, Sockets: []string{two}},

@@ -81,7 +81,7 @@ func Export(dataDir, dest string) (Info, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return Info{}, fmt.Errorf("create %s: %w", filepath.Dir(dest), err)
 	}
-	if err := os.WriteFile(dest, info.PEM, 0o644); err != nil {
+	if err := os.WriteFile(dest, info.PEM, 0o644); err != nil { //nolint:gosec // exported root CA is a public certificate meant to be shared
 		return Info{}, fmt.Errorf("write %s: %w", dest, err)
 	}
 	return info, nil

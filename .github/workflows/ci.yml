@@ -9,13 +9,21 @@ permissions:
 
 jobs:
   lint:
+    # Lint each target OS so build-tagged files (_windows.go, _darwin.go)
+    # are checked too, not only the Linux ones.
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v9.3.0
+        env:
+          GOOS: ${{ matrix.goos }}
         with:
           version: v2.15.0
 
@@ -34,6 +42,10 @@ jobs:
         env:
           CGO_ENABLED: "1"
         run: go test -race -count=1 ./...
+      - name: Integration tests
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -count=1 -tags integration ./...
       - name: cgo-free build
         env:
           CGO_ENABLED: "0"

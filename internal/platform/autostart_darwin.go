@@ -17,10 +17,10 @@ func InstallAutostart(binary string) error {
 		return err
 	}
 	path := filepath.Join(home, "Library", "LaunchAgents", version.BundleID+".plist")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // standard ~/Library/LaunchAgents mode
 		return err
 	}
-	if err := os.WriteFile(path, []byte(LaunchAgentPlist(version.BundleID, binary)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(LaunchAgentPlist(version.BundleID, binary)), 0o644); err != nil { //nolint:gosec // launchd agent plists are conventionally 0644
 		return err
 	}
 	out, err := CommandOutput("launchctl", "bootstrap", "gui/"+fmt.Sprint(os.Getuid()), path)

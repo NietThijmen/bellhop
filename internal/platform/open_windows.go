@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func openURL(u string) error     { return shellOpen(u) }
+func openURL(u string) error    { return shellOpen(u) }
 func openPath(dir string) error { return shellOpen(dir) }
 
 // shellOpen asks the shell to "open" target (the default browser for a URL,

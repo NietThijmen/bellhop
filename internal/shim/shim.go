@@ -78,7 +78,7 @@ func BellhopExe() (string, error) {
 
 // Write creates php, composer and php<line> shims in binDir.
 func Write(binDir, bellhop string, lines []string) error {
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
+	if err := os.MkdirAll(binDir, 0o750); err != nil {
 		return err
 	}
 	if err := writeOne(binDir, "php", phpBody(bellhop, "")); err != nil {

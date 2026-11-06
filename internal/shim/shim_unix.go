@@ -14,7 +14,7 @@ func shimPath(dir, name string) string {
 }
 
 func writeOne(dir, name, body string) error {
-	return os.WriteFile(shimPath(dir, name), []byte(body), 0o755)
+	return os.WriteFile(shimPath(dir, name), []byte(body), 0o755) //nolint:gosec // shims must be executable
 }
 
 func quote(s string) string {

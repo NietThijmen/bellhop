@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -193,7 +194,8 @@ func (a *app) runSetup(cmd *cobra.Command, uninstall, purge, confirm bool) error
 		return err
 	}
 	if err := setup.Setup(req, hooks); err != nil {
-		if conflict, ok := err.(*setup.ConflictError); ok {
+		var conflict *setup.ConflictError
+		if errors.As(err, &conflict) {
 			return fmt.Errorf("%s\n%s", conflict.Error(), conflict.Hint())
 		}
 		return err

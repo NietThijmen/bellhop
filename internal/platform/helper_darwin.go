@@ -25,11 +25,11 @@ func InstallResolver(tld string) (ResolverChange, error) {
 	if err := ValidTLD(tld); err != nil {
 		return ResolverChange{}, err
 	}
-	if err := os.MkdirAll(ResolverDir, 0o755); err != nil {
+	if err := os.MkdirAll(ResolverDir, 0o755); err != nil { //nolint:gosec // /etc/resolver must stay readable by system resolvers
 		return ResolverChange{}, fmt.Errorf("create %s: %w", ResolverDir, err)
 	}
 	path := filepath.Join(ResolverDir, tld)
-	if err := os.WriteFile(path, []byte(MacResolverFile()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(MacResolverFile()), 0o644); err != nil { //nolint:gosec // resolver files must be world-readable for mDNSResponder
 		return ResolverChange{}, fmt.Errorf("write %s: %w", path, err)
 	}
 	return ResolverChange{TLD: tld, Kind: ResolverMacOS, Path: path}, nil

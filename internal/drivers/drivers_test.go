@@ -324,8 +324,10 @@ func TestIsSubdirMultisite(t *testing.T) {
 	}
 }
 
-// applyRewrites mirrors the documented semantics: each rule in order, on the
-// result of the previous one, skipped when IfNotExists and the path exists.
+// applyRewrites mirrors the documented semantics, which match nginx
+// "rewrite ... last" and a Caddy route group: the first rule whose pattern
+// matches (and, with IfNotExists, whose path is not an existing file) is
+// applied, and no later rule runs.
 func applyRewrites(t *testing.T, docroot string, rules []Rewrite, p string) string {
 	t.Helper()
 	for _, rw := range rules {
@@ -334,21 +336,6 @@ func applyRewrites(t *testing.T, docroot string, rules []Rewrite, p string) stri
 				continue
 			}
 		}
-		re := regexp.MustCompile(rw.Match)
-		if re.MatchString(p) {
-			p = re.ReplaceAllString(p, rw.Replace)
-		}
-	}
-	return p
-}
-
-// applyFirstMatch mirrors nginx "rewrite ... last" semantics.
-func applyFirstMatch(t *testing.T, docroot string, rules []Rewrite, p string) string {
-	t.Helper()
-	if _, err := os.Stat(filepath.Join(docroot, filepath.FromSlash(p))); err == nil {
-		return p
-	}
-	for _, rw := range rules {
 		re := regexp.MustCompile(rw.Match)
 		if re.MatchString(p) {
 			return re.ReplaceAllString(p, rw.Replace)
@@ -370,7 +357,8 @@ func TestWordPressMultisiteRewrites(t *testing.T) {
 		"/site2/wp-content/uploads/sites/2/a.jpg":  "/wp-content/uploads/sites/2/a.jpg",
 		"/site2/wp-includes/js/jquery.js":          "/wp-includes/js/jquery.js",
 		"/site2/about/":                            "/site2/about/",
-		"/site_2-x/wp-admin/options.php":           "/wp-admin/options.php",
+		"/site_2-x/wp-admin/options.php":           "/wp-admin/options.php", // missing file: rewritten once only
+		"/site2/wp-admin/missing.php":              "/wp-admin/missing.php",
 		"/wp-admin/edit.php":                       "/wp-admin/edit.php", // real file: untouched
 		"/wp-login.php":                            "/wp-login.php",
 		"/":                                        "/",
@@ -380,13 +368,8 @@ func TestWordPressMultisiteRewrites(t *testing.T) {
 		"/site2/wp-content/uploads/sites/2/../a.x": "/wp-content/uploads/sites/2/../a.x",
 	}
 	for in, want := range cases {
-		seq := applyRewrites(t, plan.Docroot, plan.Rewrites, in)
-		first := applyFirstMatch(t, plan.Docroot, plan.Rewrites, in)
-		if seq != want {
-			t.Errorf("%s -> %s, want %s", in, seq, want)
-		}
-		if seq != first {
-			t.Errorf("%s: sequential %s differs from first-match %s", in, seq, first)
+		if got := applyRewrites(t, plan.Docroot, plan.Rewrites, in); got != want {
+			t.Errorf("%s -> %s, want %s", in, got, want)
 		}
 	}
 }
@@ -417,13 +400,8 @@ func TestBedrockMultisiteRewrites(t *testing.T) {
 		"/site2/about/":               "/site2/about/",
 	}
 	for in, want := range cases {
-		seq := applyRewrites(t, plan.Docroot, plan.Rewrites, in)
-		first := applyFirstMatch(t, plan.Docroot, plan.Rewrites, in)
-		if seq != want {
-			t.Errorf("%s -> %s, want %s", in, seq, want)
-		}
-		if seq != first {
-			t.Errorf("%s: sequential %s differs from first-match %s", in, seq, first)
+		if got := applyRewrites(t, plan.Docroot, plan.Rewrites, in); got != want {
+			t.Errorf("%s -> %s, want %s", in, got, want)
 		}
 	}
 }

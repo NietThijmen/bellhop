@@ -421,6 +421,10 @@ func denyRoute(plan drivers.ServePlan) map[string]any {
 
 func rewriteRoutes(site, docroot string, rules []drivers.Rewrite) []any {
 	out := make([]any, 0, len(rules))
+	// One route group: Caddy runs only the first matching route of a group,
+	// which gives nginx "rewrite ... last" semantics. Without it a rewritten
+	// path could be rewritten again by a later rule.
+	group := "rw_" + token(site)
 	for i, rw := range rules {
 		name := regexpName(site, i)
 		match := map[string]any{
@@ -441,6 +445,7 @@ func rewriteRoutes(site, docroot string, rules []drivers.Rewrite) []any {
 			}}
 		}
 		out = append(out, map[string]any{
+			"group": group,
 			"handle": []any{map[string]any{
 				"handler": "rewrite",
 				"uri":     rewriteTarget(name, rw.Replace),

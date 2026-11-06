@@ -283,7 +283,7 @@ func (d *daemon) handleSiteMigrate(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		cmd := exec.CommandContext(ctx, bin, db.MigrateArgs()...)
+		cmd := exec.CommandContext(ctx, bin, db.MigrateArgs()...) //nolint:gosec // G702: bin is our installed PHP CLI, args are constant, argv only (no shell)
 		cmd.Dir = site.Path
 		cmd.Stdout = h.LogWriter()
 		cmd.Stderr = h.LogWriter()

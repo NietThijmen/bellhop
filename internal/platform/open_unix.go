@@ -16,7 +16,7 @@ import (
 // those are left running once this passes.
 const openerWait = 5 * time.Second
 
-func openURL(u string) error     { return runOpener(u) }
+func openURL(u string) error    { return runOpener(u) }
 func openPath(dir string) error { return runOpener(dir) }
 
 // runOpener runs the platform opener (openTool) with target as its only

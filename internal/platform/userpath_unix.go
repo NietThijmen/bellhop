@@ -48,7 +48,7 @@ func editProfile(edit func(string) string) error {
 		return err
 	}
 	next := edit(string(raw))
-	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(next), 0o644); err != nil { //nolint:gosec // shell profiles are conventionally 0644
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

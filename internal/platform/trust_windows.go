@@ -3,7 +3,7 @@
 package platform
 
 import (
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: the Windows cert store indexes certificates by SHA-1 thumbprint
 	"crypto/x509"
 	"runtime"
 	"unsafe"
@@ -28,14 +28,14 @@ func RootTrusted(cert *x509.Certificate) bool {
 	}
 	defer func() { _ = windows.CertCloseStore(store, 0) }()
 
-	sum := sha1.Sum(cert.Raw)
+	sum := sha1.Sum(cert.Raw) //nolint:gosec // G401: lookup key only, see import
 	blob := windows.CryptHashBlob{Size: uint32(len(sum)), Data: &sum[0]}
 	found, err := windows.CertFindCertificateInStore(
 		store,
 		windows.X509_ASN_ENCODING|windows.PKCS_7_ASN_ENCODING,
 		0,
 		windows.CERT_FIND_SHA1_HASH,
-		unsafe.Pointer(&blob),
+		unsafe.Pointer(&blob), //nolint:gosec // G103: CertFindCertificateInStore takes a void pointer
 		nil,
 	)
 	runtime.KeepAlive(sum)
