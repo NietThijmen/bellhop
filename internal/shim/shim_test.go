@@ -31,6 +31,31 @@ func TestVersionForWalksParents(t *testing.T) {
 	}
 }
 
+// TestVersionForSymlink covers macOS, where a site stored as /var/... is
+// reported by os.Getwd as /private/var/...: the same directory reached
+// through a symlink must match the site.
+func TestVersionForSymlink(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	if err := os.MkdirAll(filepath.Join(real, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	sites := []Site{{Path: link, PHP: "8.1"}}
+	for _, dir := range []string{real, filepath.Join(real, "app"), filepath.Join(real, "app", "missing")} {
+		if got := VersionFor(dir, sites, "8.3"); got != "8.1" {
+			t.Errorf("site via symlink, cwd %s = %s, want 8.1", dir, got)
+		}
+	}
+	sites = []Site{{Path: real, PHP: "8.2"}}
+	if got := VersionFor(filepath.Join(link, "app"), sites, "8.3"); got != "8.2" {
+		t.Errorf("cwd via symlink = %s, want 8.2", got)
+	}
+}
+
 func TestWriteShims(t *testing.T) {
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "bellhop.exe")

@@ -17,16 +17,18 @@ type Site struct {
 
 // VersionFor returns the PHP line for dir. It walks dir and its parents and
 // uses the longest matching linked or parked site. An empty site PHP uses
-// fallback. fallback is used when no site contains dir.
+// fallback. fallback is used when no site contains dir. Paths are compared
+// after resolving symlinks (os.Getwd on macOS reports /private/var for a
+// site stored as /var/...) and with the platform's case rules.
 func VersionFor(dir string, sites []Site, fallback string) string {
-	dir = filepath.Clean(dir)
+	dir = comparable(dir)
 	bestLen := -1
 	best := ""
 	for _, s := range sites {
-		p := filepath.Clean(s.Path)
-		if p == "" || p == "." {
+		if s.Path == "" || filepath.Clean(s.Path) == "." {
 			continue
 		}
+		p := comparable(s.Path)
 		if !contains(p, dir) {
 			continue
 		}
@@ -44,6 +46,30 @@ func VersionFor(dir string, sites []Site, fallback string) string {
 		return fallback
 	}
 	return best
+}
+
+// comparable returns p as a platform.PathKey (absolute, and case-folded on
+// case-insensitive systems) with symlinks resolved in its longest existing
+// ancestor, so a path that does not exist yet still compares correctly.
+func comparable(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	p = filepath.Clean(p)
+	rest := ""
+	for cur := p; ; {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			p = filepath.Join(resolved, rest)
+			break
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+		cur = parent
+	}
+	return platform.PathKey(p)
 }
 
 func contains(parent, dir string) bool {

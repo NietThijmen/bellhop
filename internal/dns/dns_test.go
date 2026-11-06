@@ -50,35 +50,10 @@ func TestAnswer(t *testing.T) {
 }
 
 func TestListenLoopback(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := ln.Addr().String()
-	if err := ln.Close(); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
+	addr, cancel, errc := runOnFreePort(t)
 	defer cancel()
-	errc := make(chan error, 1)
-	go func() { errc <- Run(ctx, addr, "test") }()
 
-	udp := &mdns.Client{Net: "udp", Timeout: 200 * time.Millisecond}
 	tcp := &mdns.Client{Net: "tcp", Timeout: 200 * time.Millisecond}
-	deadline := time.Now().Add(3 * time.Second)
-	var last error
-	for time.Now().Before(deadline) {
-		got, _, err := udp.Exchange(askMsg("site.test.", mdns.TypeA), addr)
-		if err == nil && got != nil && got.Rcode == mdns.RcodeSuccess {
-			last = nil
-			break
-		}
-		last = err
-		time.Sleep(15 * time.Millisecond)
-	}
-	if last != nil {
-		t.Fatal(last)
-	}
 	got, _, err := tcp.Exchange(askMsg("other.example.", mdns.TypeA), addr)
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +70,62 @@ func TestListenLoopback(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("resolver did not stop")
 	}
+}
+
+// freeDNSAddr returns 127.0.0.1:<port> where the port was free for both
+// UDP and TCP a moment ago.
+func freeDNSAddr(t *testing.T) string {
+	t.Helper()
+	for range 20 {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		pc, err := net.ListenPacket("udp", addr)
+		_ = ln.Close()
+		if err != nil {
+			continue
+		}
+		_ = pc.Close()
+		return addr
+	}
+	t.Fatal("no port free for both UDP and TCP")
+	return ""
+}
+
+// runOnFreePort starts the resolver on a free port and waits until it
+// answers over UDP. If Run fails (another process won the bind race), it
+// retries on a new port; any other failure is reported with Run's error.
+func runOnFreePort(t *testing.T) (addr string, cancel context.CancelFunc, errc <-chan error) {
+	t.Helper()
+	udp := &mdns.Client{Net: "udp", Timeout: 200 * time.Millisecond}
+	var last error
+	for range 5 {
+		addr = freeDNSAddr(t)
+		ctx, stop := context.WithCancel(context.Background())
+		ch := make(chan error, 1)
+		go func() { ch <- Run(ctx, addr, "test") }()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			select {
+			case err := <-ch:
+				last = err
+				deadline = time.Time{} // Run exited: retry on a new port
+				continue
+			default:
+			}
+			got, _, err := udp.Exchange(askMsg("site.test.", mdns.TypeA), addr)
+			if err == nil && got != nil && got.Rcode == mdns.RcodeSuccess {
+				return addr, stop, ch
+			}
+			last = err
+			time.Sleep(15 * time.Millisecond)
+		}
+		stop()
+	}
+	t.Fatalf("resolver never answered: %v", last)
+	return "", nil, nil
 }
 
 func ask(t *testing.T, r Resolver, name string, qtype uint16) *mdns.Msg {
